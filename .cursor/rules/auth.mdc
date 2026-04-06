@@ -1,0 +1,68 @@
+---
+description: Auth router, security utilities, OTP, MFA, password reset patterns
+globs: ["app/routers/auth.py", "app/core/security.py", "app/services/otp_service.py", "app/schemas/auth.py"]
+alwaysApply: false
+---
+
+# Auth Module Rules
+
+## Endpoint Map (auth.py)
+```
+POST /auth/validate              ← NextAuth credentials authorize() pre-check
+POST /auth/login                 ← JSON login → access + refresh tokens
+POST /auth/token                 ← OAuth2 form login (Swagger UI)
+POST /auth/refresh               ← Swap refresh token → new access token
+POST /auth/register/contributor  ← 4-step contributor registration
+POST /auth/register/enterprise   ← 4-step enterprise admin registration
+POST /auth/sso/onboard           ← First-time SSO contributor profile creation
+POST /auth/otp/send              ← Send phone or email OTP
+POST /auth/otp/verify            ← Verify OTP
+POST /auth/mfa/setup             ← Initiate TOTP provisioning
+POST /auth/mfa/verify            ← Verify TOTP code
+POST /auth/forgot-password       ← Send password-reset email
+POST /auth/reset-password        ← Consume reset token + set new password
+GET  /auth/me                    ← Current user profile (Bearer)
+GET  /auth/users                 ← List users for approver dropdowns
+```
+
+## Token Pattern
+- Access tokens: short-lived (ACCESS_TOKEN_EXPIRE_MINUTES), type="access"
+- Refresh tokens: 7 days, type="refresh"
+- Always check `payload.get("type") == "access"` before trusting an access token
+- Build token payloads with `{"sub": user_id, "role": role}`
+
+## Password Reset Flow
+1. `POST /auth/forgot-password` → generate token via `secrets.token_urlsafe(32)`, store in `password_resets` collection with TTL
+2. `POST /auth/reset-password` → look up token, verify not expired, hash new password, delete token
+
+## OTP Service (otp_service.py)
+- `OTP_DRY_RUN=True` in dev → log OTP instead of sending
+- OTP codes stored in `otp_codes` collection with TTL index on `expires_at`
+- Expire after `OTP_EXPIRE_MINUTES` (default 10)
+- Always invalidate OTP after successful verify
+
+## Security Utilities (security.py)
+- `get_password_hash(password)` → bcrypt via passlib
+- `verify_password(plain, hashed)` → bcrypt verify
+- `create_access_token(data, expires_delta)` → JWT
+- `create_refresh_token(data)` → JWT with 7-day expiry
+- `decode_token(token)` → raises 401 HTTPException on invalid/expired
+- `get_current_user(token)` → FastAPI Depends, returns full user dict with `id` as string
+
+## MongoDB Collections (auth)
+- `users` — unique index on `email`
+- `otp_codes` — compound index on (type, target) + TTL on expires_at
+- `password_resets` — unique index on `token` + TTL on expires_at
+
+## User Roles
+From `UserRole` enum in `app/schemas/auth.py`:
+- `enterprise_admin`
+- `contributor`
+- `viewer`
+(always check role before performing admin operations)
+
+## Never
+- Never store plain-text passwords
+- Never return password_hash in any response
+- Never skip token type check (`type == "access"`) on protected routes
+- Never reuse OTP after it's been verified
