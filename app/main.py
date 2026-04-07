@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 from app.core.database import connect_db, close_db
 from app.routers import auth, mfa, oauth, wizard, sow, approvals, users, manual_sow_router
+from app.routers.decomposition import decomposition_router
 from app.services.manual_sow.errors import ManualSowSpecException
 
 
@@ -207,6 +208,7 @@ app.include_router(approvals.router, prefix=API_PREFIX)
 app.include_router(users.router, prefix=API_PREFIX)
 app.include_router(manual_sow_router.router, prefix=API_PREFIX)
 app.include_router(manual_sow_router.nda_router, prefix=API_PREFIX)
+app.include_router(decomposition_router, prefix=API_PREFIX)
 
 
 def custom_openapi():
