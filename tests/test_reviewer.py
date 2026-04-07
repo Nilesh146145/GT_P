@@ -29,7 +29,11 @@ def _mongo_listening(host: str = "127.0.0.1", port: int = 27017, timeout: float 
 
 
 def _load_main(enabled: bool):
+    """Rebuild Settings and FastAPI app so REVIEWER_API_ENABLED matches os.environ."""
     os.environ["REVIEWER_API_ENABLED"] = "true" if enabled else "false"
+    import app.core.config as config_module
+
+    importlib.reload(config_module)
     import app.main as main_module
 
     return importlib.reload(main_module)
