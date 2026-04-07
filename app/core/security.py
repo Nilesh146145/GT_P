@@ -100,6 +100,7 @@ async def _load_user_by_id(user_id: str) -> Optional[dict]:
 def _enforce_access_mfa_policy(user: dict, payload: dict) -> None:
     """Ensure JWT matches user's MFA state for protected API access."""
     mfa_verified_claim = payload.get("mfa_verified")
+    role = str(user.get("role") or "").strip().lower()
 
     if user.get("mfa_enabled") and mfa_verified_claim is not True:
         raise HTTPException(
@@ -107,7 +108,7 @@ def _enforce_access_mfa_policy(user: dict, payload: dict) -> None:
             detail={"code": "MFA_REQUIRED", "message": "Multi-factor authentication required."},
         )
 
-    if user.get("role") == "enterprise" and not user.get("mfa_enabled"):
+    if role in {"enterprise", "reviewer"} and not user.get("mfa_enabled"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "MFA_SETUP_REQUIRED", "message": "Complete MFA enrollment to continue."},

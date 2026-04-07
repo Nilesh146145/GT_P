@@ -250,6 +250,8 @@ async def find_or_create_oauth_user(
             "role": "contributor",
             "provider": provider,
             "mfa_enabled": False,
+            "requires_password_change": False,
+            "is_first_login": False,
             "email_verified": True,
             "phone_verified": False,
             "sso_only": True,

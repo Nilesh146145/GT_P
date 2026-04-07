@@ -1,5 +1,12 @@
 from motor.motor_asyncio import AsyncIOMotorClient
+
 from app.core.config import settings
+from app.models.reviewer import (
+    REVIEWER_ASSIGNMENTS_COLLECTION,
+    REVIEWER_EVIDENCE_COLLECTION,
+    REVIEWER_PROJECTS_COLLECTION,
+    REVIEWER_RECOMMENDATIONS_COLLECTION,
+)
 
 client: AsyncIOMotorClient = None
 
@@ -98,3 +105,19 @@ def get_mfa_setup_pending_collection():
 
 def get_mfa_audit_collection():
     return get_database()["mfa_audit_log"]
+
+
+def get_reviewer_assignments_collection():
+    return get_database()[REVIEWER_ASSIGNMENTS_COLLECTION]
+
+
+def get_reviewer_evidence_collection():
+    return get_database()[REVIEWER_EVIDENCE_COLLECTION]
+
+
+def get_reviewer_recommendations_collection():
+    return get_database()[REVIEWER_RECOMMENDATIONS_COLLECTION]
+
+
+def get_reviewer_projects_collection():
+    return get_database()[REVIEWER_PROJECTS_COLLECTION]

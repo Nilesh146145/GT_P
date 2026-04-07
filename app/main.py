@@ -9,8 +9,9 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 
+from app.core.config import settings
 from app.core.database import connect_db, close_db
-from app.routers import auth, mfa, oauth, wizard, sow, approvals, users, manual_sow_router
+from app.routers import auth, mfa, oauth, reviewer, wizard, sow, approvals, users, manual_sow_router
 from app.routers.decomposition import decomposition_router
 from app.services.manual_sow.errors import ManualSowSpecException
 
@@ -77,6 +78,16 @@ async def create_indexes():
     await db["mfa_setup_pending"].create_index("expires_at", expireAfterSeconds=0)
     await db["mfa_audit_log"].create_index("user_id")
     await db["mfa_audit_log"].create_index("created_at")
+
+    # Reviewer
+    await db["reviewer_assignments"].create_index("reviewer_user_id")
+    await db["reviewer_assignments"].create_index([("reviewer_user_id", 1), ("status", 1)])
+    await db["reviewer_evidence"].create_index("reviewer_user_id")
+    await db["reviewer_evidence"].create_index([("evidence_id", 1), ("reviewer_user_id", 1)])
+    await db["reviewer_recommendations"].create_index("reviewer_user_id")
+    await db["reviewer_recommendations"].create_index([("evidence_id", 1), ("reviewer_user_id", 1)])
+    await db["reviewer_projects"].create_index("reviewer_user_id")
+    await db["reviewer_projects"].create_index([("project_id", 1), ("reviewer_user_id", 1)])
 
     print("MongoDB indexes created.")
 
@@ -209,6 +220,8 @@ app.include_router(users.router, prefix=API_PREFIX)
 app.include_router(manual_sow_router.router, prefix=API_PREFIX)
 app.include_router(manual_sow_router.nda_router, prefix=API_PREFIX)
 app.include_router(decomposition_router, prefix=API_PREFIX)
+if settings.REVIEWER_API_ENABLED:
+    app.include_router(reviewer.router, prefix=API_PREFIX)
 
 
 def custom_openapi():

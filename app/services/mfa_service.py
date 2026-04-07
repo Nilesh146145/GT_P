@@ -25,6 +25,7 @@ from app.core.database import (
 from app.core.rate_limit import check_rate_limit
 from app.core.totp_crypto import decrypt_totp_secret, encrypt_totp_secret
 from app.core.security import get_password_hash, verify_password
+from app.services.reviewer import reviewer_auth_service
 
 logger = logging.getLogger(__name__)
 
@@ -318,10 +319,16 @@ async def disable_mfa_for_user(
     ip_address: Optional[str],
     user_agent: Optional[str],
 ) -> None:
-    if user.get("role") == "enterprise":
+    role = reviewer_auth_service.normalize_role(user.get("role"))
+    if role == "enterprise":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "MFA_POLICY_FORBIDDEN", "message": "Enterprise accounts cannot disable MFA."},
+        )
+    if role == "reviewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "MFA_POLICY_FORBIDDEN", "message": "Reviewer accounts cannot disable MFA."},
         )
 
     if not user.get("hashed_password"):
@@ -362,7 +369,7 @@ async def disable_mfa_for_user(
 
 
 def mfa_enrollment_required(user: dict) -> bool:
-    return user.get("role") == "enterprise" and not user.get("mfa_enabled")
+    return reviewer_auth_service.mfa_enrollment_required(user)
 
 
 def needs_mfa_verify_after_login(user: dict) -> bool:

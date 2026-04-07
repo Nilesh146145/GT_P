@@ -36,6 +36,7 @@ from app.schemas.auth import (
     TokenPair,
     ValidateResponse,
 )
+from app.services.reviewer import reviewer_auth_service
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ def _build_auth_user(user: dict) -> AuthUser:
         provider=user.get("provider", "credentials"),
         phoneVerified=user.get("phone_verified", False),
         emailVerified=user.get("email_verified", False),
+        **reviewer_auth_service.auth_user_flags(user),
     )
 
 
@@ -138,8 +140,7 @@ async def login_user(
     user_id = str(user["_id"])
     role = user.get("role", "enterprise")
 
-    # Enterprise: mandatory enrollment before full session
-    if role == "enterprise" and not user.get("mfa_enabled"):
+    if reviewer_auth_service.mfa_enrollment_required(user):
         pending = create_mfa_pending_token(user_id, role, "setup")
         return MfaPendingLoginResponse(
             status="mfa_setup_required",
@@ -180,7 +181,7 @@ async def oauth_primary_auth_result(
     user_id = str(user["_id"])
     role = user.get("role", "enterprise")
 
-    if role == "enterprise" and not user.get("mfa_enabled"):
+    if reviewer_auth_service.mfa_enrollment_required(user):
         pending = create_mfa_pending_token(user_id, role, "setup")
         return MfaPendingLoginResponse(
             status="mfa_setup_required",
@@ -253,7 +254,7 @@ async def refresh_session(refresh_token: str) -> TokenPair:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "MFA_SESSION_EXPIRED", "message": "Sign in again to continue."},
         )
-    if user.get("role") == "enterprise" and not user.get("mfa_enabled"):
+    if reviewer_auth_service.mfa_enrollment_required(user):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "MFA_SETUP_REQUIRED", "message": "Complete MFA enrollment."},

@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 def _validate_password(v: str) -> str:
@@ -35,6 +35,9 @@ class AuthUser(BaseModel):
     provider: str
     phone_verified: bool = Field(alias="phoneVerified")
     email_verified: bool = Field(alias="emailVerified")
+    requires_password_change: bool = Field(default=False, alias="requiresPasswordChange")
+    is_first_login: bool = Field(default=False, alias="isFirstLogin")
+    mfa_enabled: bool = Field(default=False, alias="mfaEnabled")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -94,6 +97,8 @@ class CurrentUserResponse(BaseModel):
     email_verified: bool = Field(alias="emailVerified")
     phone_verified: bool = Field(alias="phoneVerified")
     role: str = "contributor"
+    requires_password_change: bool = Field(default=False, alias="requiresPasswordChange")
+    is_first_login: bool = Field(default=False, alias="isFirstLogin")
     mfa_enabled: bool = Field(default=False, alias="mfaEnabled")
     mfa_enrollment_required: bool = Field(default=False, alias="mfaEnrollmentRequired")
     auth_pending: bool = Field(default=False, alias="authPending")
@@ -121,3 +126,13 @@ class SessionListResponse(BaseModel):
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
     role: Optional[str] = None
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def new_password_limits(cls, value: str) -> str:
+        return _validate_password(value)

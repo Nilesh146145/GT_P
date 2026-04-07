@@ -71,6 +71,8 @@ async def register_contributor(payload: ContributorRegisterRequest) -> Contribut
         "role": "contributor",
         "provider": "credentials",
         "mfa_enabled": False,
+        "requires_password_change": False,
+        "is_first_login": False,
         "email_verified": False,
         "phone_verified": False,
         "sso_only": False,

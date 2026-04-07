@@ -28,6 +28,7 @@ from app.schemas.auth import (
     LoginResponse,
     LogoutResponse,
     MfaPendingLoginResponse,
+    PasswordChangeRequest,
     RefreshRequest,
     SessionListResponse,
     TokenPair,
@@ -37,6 +38,7 @@ from app.services import mfa_service
 from app.schemas.contributor_auth import ContributorRegisterRequest, ContributorRegisterResponse
 from app.schemas.enterprise_auth import EnterpriseRegisterRequest, EnterpriseRegisterResponse
 from app.services import auth_service, contributor_auth_service, enterprise_auth_service, password_service
+from app.services.reviewer import reviewer_auth_service
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -98,6 +100,8 @@ async def me(current_user: dict = Depends(get_current_user_for_me)) -> CurrentUs
         emailVerified=u.get("email_verified", False),
         phoneVerified=u.get("phone_verified", False),
         role=u.get("role", "contributor"),
+        requiresPasswordChange=reviewer_auth_service.reviewer_requires_password_change(u),
+        isFirstLogin=bool(u.get("is_first_login", False)),
         mfaEnabled=bool(u.get("mfa_enabled", False)),
         mfaEnrollmentRequired=mfa_service.mfa_enrollment_required(u),
         authPending=auth_pending,
@@ -120,6 +124,19 @@ async def revoke_session(
     current_user: dict = Depends(get_current_user),
 ) -> LogoutResponse:
     await auth_service.revoke_session_by_id(session_id=session_id, user_id=current_user["id"])
+    return LogoutResponse(success=True)
+
+
+@router.post("/password/change", response_model=LogoutResponse)
+async def change_password(
+    payload: PasswordChangeRequest,
+    current_user: dict = Depends(get_current_user),
+) -> LogoutResponse:
+    await password_service.change_password(
+        current_user["id"],
+        payload.current_password,
+        payload.new_password,
+    )
     return LogoutResponse(success=True)
 
 

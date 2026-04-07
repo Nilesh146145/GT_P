@@ -11,10 +11,14 @@ Handles password reset initiation.
 
 import logging
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from app.core.database import get_db, get_users_collection
+from bson import ObjectId
+from fastapi import HTTPException, status
+
+from app.core.database import get_db, get_sessions_collection, get_users_collection
+from app.core.security import get_password_hash, verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -52,3 +56,36 @@ async def start_password_reset(email: str, role: Optional[str] = None) -> None:
 
     # TODO: replace with real email delivery in production
     logger.info("[DRY RUN] Password reset token for %s (role=%s): %s", email, role, token)
+
+
+async def change_password(user_id: str, current_password: str, new_password: str) -> None:
+    users_col = get_users_collection()
+    try:
+        object_id = ObjectId(user_id)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user.") from exc
+
+    user = await users_col.find_one({"_id": object_id})
+    if not user or not user.get("hashed_password"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    if not verify_password(current_password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect.",
+        )
+
+    await users_col.update_one(
+        {"_id": object_id},
+        {
+            "$set": {
+                "hashed_password": get_password_hash(new_password),
+                "requires_password_change": False,
+                "is_first_login": False,
+                "updated_at": datetime.now(timezone.utc),
+            }
+        },
+    )
+    await get_sessions_collection().update_many(
+        {"user_id": user_id, "revoked_at": None},
+        {"$set": {"revoked_at": datetime.now(timezone.utc)}},
+    )

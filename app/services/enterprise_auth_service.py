@@ -70,6 +70,8 @@ async def register_enterprise(payload: EnterpriseRegisterRequest) -> EnterpriseR
         "phone": payload.phone,
         "enterprise_profile_id": enterprise_profile_id,
         "mfa_enabled": False,
+        "requires_password_change": False,
+        "is_first_login": False,
         "email_verified": False,
         "phone_verified": False,
         "created_at": now,
