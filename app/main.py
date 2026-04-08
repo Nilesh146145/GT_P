@@ -5,7 +5,7 @@ FastAPI + MongoDB backend for the 10-step SOW Wizard.
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 
@@ -266,6 +266,12 @@ async def root():
     }
 
 
+@app.head("/", include_in_schema=False)
+async def root_head():
+    """Render and load balancers often probe with HEAD; without this, FastAPI returns 405."""
+    return Response(status_code=200)
+
+
 @app.get("/health", tags=["Health"], summary="Detailed health check")
 async def health():
     from app.core.database import get_database
@@ -281,3 +287,9 @@ async def health():
         "database": db_status,
         "version": "1.0.0",
     }
+
+
+@app.head("/health", include_in_schema=False)
+async def health_head():
+    """Lightweight probe for platforms that use HEAD (avoid DB work on every probe)."""
+    return Response(status_code=200)
