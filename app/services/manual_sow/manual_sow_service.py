@@ -23,12 +23,18 @@ from app.schemas.manual_sow.enums import (
     ApprovalStageKey,
     ApprovalStageStatus,
     CommercialSectionKey,
+    CommercialSectionStatus,
     ManualSowStatus,
     STAGE_ORDER,
     STAGE_SLA_DAYS,
     UploadProcessingState,
 )
 from app.services.manual_sow import extraction_service, gap_analysis, storage
+from app.services.manual_sow.commercial_prefill import (
+    build_commercial_prefill_from_extraction,
+    commercial_needs_prefill,
+    merge_commercial_details_prefill,
+)
 from app.services.manual_sow.errors import raise_spec
 from app.services.manual_sow.commercial_validation import (
     all_sections_complete,
@@ -296,6 +302,23 @@ class ManualSowService:
                 await asyncio.sleep(0.05)
 
             result = extraction_service.extract_bytes(filename, raw)
+
+            doc_pre = await col.find_one({"public_id": sow_public_id}) or {}
+            merged_cd = dict(doc_pre.get("commercial_details") or {})
+            sec_stat = dict(doc_pre.get("section_status") or {})
+            if doc_pre.get("public_id"):
+                seed_bc, seed_ti = build_commercial_prefill_from_extraction(
+                    result.items,
+                    result.report,
+                    title=str(doc_pre.get("title") or ""),
+                    client=str(doc_pre.get("client") or ""),
+                )
+                merged_cd = merge_commercial_details_prefill(merged_cd, seed_bc, seed_ti)
+                for sec_key in (CommercialSectionKey.businessContext.value, CommercialSectionKey.techIntegrations.value):
+                    if sec_stat.get(sec_key) == CommercialSectionStatus.not_started.value:
+                        sec_stat[sec_key] = CommercialSectionStatus.in_progress.value
+
+            now_done = _utcnow()
             await col.update_one(
                 {"public_id": sow_public_id},
                 {
@@ -308,7 +331,9 @@ class ManualSowService:
                         "total_sections": len(result.items),
                         "pages": result.page_count,
                         "status": ManualSowStatus.review.value,
-                        "updated_at": _utcnow(),
+                        "commercial_details": merged_cd,
+                        "section_status": sec_stat,
+                        "updated_at": now_done,
                     }
                 },
             )
@@ -522,12 +547,55 @@ class ManualSowService:
         }
 
     @staticmethod
+    async def _ensure_commercial_prefill_from_extraction(doc: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Gap-fill businessContext and techIntegrations from stored extraction items (legacy rows or race with GET).
+        """
+        up = doc.get("upload_processing") or {}
+        if up.get("state") != UploadProcessingState.complete.value:
+            return doc
+        if not commercial_needs_prefill(doc.get("commercial_details")):
+            return doc
+        col_i = get_manual_sow_extraction_items_collection()
+        items: List[Dict[str, Any]] = []
+        async for it in col_i.find({"sow_public_id": doc["public_id"]}):
+            row = dict(it)
+            row.pop("_id", None)
+            items.append(row)
+        if not items:
+            return doc
+        seed_bc, seed_ti = build_commercial_prefill_from_extraction(
+            items,
+            doc.get("extraction_report") or {},
+            title=str(doc.get("title") or ""),
+            client=str(doc.get("client") or ""),
+        )
+        merged = merge_commercial_details_prefill(doc.get("commercial_details") or {}, seed_bc, seed_ti)
+        if merged == doc.get("commercial_details"):
+            return doc
+        sec_stat = dict(doc.get("section_status") or {})
+        for sec_key in (CommercialSectionKey.businessContext.value, CommercialSectionKey.techIntegrations.value):
+            if sec_stat.get(sec_key) == CommercialSectionStatus.not_started.value:
+                sec_stat[sec_key] = CommercialSectionStatus.in_progress.value
+        now = _utcnow()
+        col = get_manual_sows_collection()
+        await col.update_one(
+            {"public_id": doc["public_id"]},
+            {"$set": {"commercial_details": merged, "section_status": sec_stat, "updated_at": now}},
+        )
+        out = dict(doc)
+        out["commercial_details"] = merged
+        out["section_status"] = sec_stat
+        return out
+
+    @staticmethod
     async def get_commercial_details(public_id: str) -> Dict[str, Any]:
         doc = await ManualSowService.get_sow_doc(public_id)
         if not doc:
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404, detail="SOW not found")
+        doc = await ManualSowService._ensure_commercial_prefill_from_extraction(doc)
         return {
             "sow_id": public_id,
             "commercial_details": doc.get("commercial_details") or {},

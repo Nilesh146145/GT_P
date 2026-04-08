@@ -173,6 +173,24 @@ async def test_wizard_shape_adapter_builds_steps():
     assert out.get("sections")
 
 
+def test_commercial_prefill_from_extraction_passes_section_validation():
+    """AI prefill for businessContext + techIntegrations must satisfy validate_section for mark-complete."""
+    from app.services.manual_sow.commercial_prefill import build_commercial_prefill_from_extraction
+    from app.services.manual_sow.commercial_validation import validate_section
+    from app.schemas.manual_sow.enums import CommercialSectionKey
+
+    items = [
+        {"category": "business_objectives", "text": "Grow revenue by 20% in fiscal year through digital channels."},
+        {"category": "features", "text": "Python FastAPI backend with React frontend and PostgreSQL database."},
+    ]
+    report = {"contextDetection": {"businessObjectives": "PRESENT"}}
+    bc, ti = build_commercial_prefill_from_extraction(items, report, title="Proj", client="Org")
+    ok, err = validate_section(CommercialSectionKey.businessContext, bc)
+    assert ok, err
+    ok2, err2 = validate_section(CommercialSectionKey.techIntegrations, ti)
+    assert ok2, err2
+
+
 @pytest.mark.asyncio
 async def test_gate_features_required():
     from app.services.manual_sow.gates import gate_step3_to_4
