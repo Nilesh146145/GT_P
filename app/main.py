@@ -8,9 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
+import logging
 
 from app.core.config import settings
-from app.core.database import connect_db, close_db
+from app.core.database import close_db, connect_db
 from app.routers import auth, mfa, oauth, reviewer, wizard, sow, approvals, users, manual_sow_router
 from app.routers.decomposition import decomposition_router
 from app.services.manual_sow.errors import ManualSowSpecException
@@ -20,17 +21,28 @@ from app.services.manual_sow.errors import ManualSowSpecException
 # LIFESPAN
 # ──────────────────────────────────────────────
 
+_log = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_db()
-    await create_indexes()
+    try:
+        await create_indexes()
+    except Exception:
+        _log.exception("MongoDB index creation failed; continuing startup")
     yield
     await close_db()
 
 
 async def create_indexes():
     """Create MongoDB indexes for performance."""
-    from app.core.database import get_database
+    from app.core.database import get_database, is_db_connected
+
+    if not is_db_connected():
+        print("Skipping MongoDB indexes (no database connection).")
+        return
+
     db = get_database()
 
     # Users

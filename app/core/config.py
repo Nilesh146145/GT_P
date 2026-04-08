@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # ── Database ──────────────────────────────────────────────────────────
     MONGODB_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "sow_generator"
+    # Prevent infinite hangs on Atlas/network issues (critical for Render health checks)
+    MONGODB_SERVER_SELECTION_TIMEOUT_MS: int = 10_000
+    MONGODB_CONNECT_TIMEOUT_MS: int = 10_000
 
     # ── JWT / Auth ────────────────────────────────────────────────────────
     SECRET_KEY: str = "your-secret-key-change-in-production-min-32-chars"

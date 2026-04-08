@@ -1,6 +1,10 @@
+import logging
+
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 from app.models.reviewer import (
     REVIEWER_ASSIGNMENTS_COLLECTION,
     REVIEWER_EVIDENCE_COLLECTION,
@@ -11,10 +15,27 @@ from app.models.reviewer import (
 client: AsyncIOMotorClient = None
 
 
-async def connect_db():
+def _mongo_url_for_log(url: str) -> str:
+    """Avoid printing credentials from connection string."""
+    if "@" in url:
+        return f"...@{url.split('@', 1)[-1]}"
+    return url
+
+
+async def connect_db() -> None:
+    """Create Motor client; on failure leave client None so HTTP can still start (e.g. Render)."""
     global client
-    client = AsyncIOMotorClient(settings.MONGODB_URL)
-    print(f"Connected to MongoDB: {settings.MONGODB_URL}")
+    try:
+        client = AsyncIOMotorClient(
+            settings.MONGODB_URL,
+            serverSelectionTimeoutMS=settings.MONGODB_SERVER_SELECTION_TIMEOUT_MS,
+            connectTimeoutMS=settings.MONGODB_CONNECT_TIMEOUT_MS,
+        )
+        await client[settings.DATABASE_NAME].command("ping")
+        print(f"Connected to MongoDB: {_mongo_url_for_log(settings.MONGODB_URL)}")
+    except Exception as e:
+        logger.exception("MongoDB unavailable — starting API in degraded mode: %s", e)
+        client = None
 
 
 async def close_db():
@@ -24,7 +45,13 @@ async def close_db():
         print("MongoDB connection closed.")
 
 
+def is_db_connected() -> bool:
+    return client is not None
+
+
 def get_database():
+    if client is None:
+        raise RuntimeError("Database not initialized")
     return client[settings.DATABASE_NAME]
 
 
