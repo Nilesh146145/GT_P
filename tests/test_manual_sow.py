@@ -1,5 +1,6 @@
 """Tests for Manual SOW intake API (/api/v1/sow)."""
 
+import asyncio
 import io
 import socket
 
@@ -113,6 +114,116 @@ async def test_commercial_validate_endpoint(client_auth):
     )
     assert v.status_code == 200
     assert v.json().get("valid") is True
+
+
+@pytest.mark.asyncio
+async def test_manual_generation_preview_includes_ai_derived_fields(client_auth):
+    client, _uid = client_auth
+    files = {"file": ("ai.pdf", io.BytesIO(_minimal_pdf_bytes()), "application/pdf")}
+    data = {"projectTitle": "AI Enrichment Project", "clientOrganisation": "ACME"}
+    up = await client.post(f"{BASE}/sow/upload", files=files, data=data)
+    if up.status_code != 200:
+        pytest.skip(f"MongoDB or storage required: {up.status_code} {up.text}")
+    sow_id = up.json()["sow_id"]
+
+    # Wait for extraction completion.
+    for _ in range(60):
+        st = await client.get(f"{BASE}/sow/{sow_id}/upload-status")
+        assert st.status_code == 200, st.text
+        state = st.json().get("processing_state")
+        if state == "complete":
+            break
+        await asyncio.sleep(0.15)
+    else:
+        pytest.fail("Upload/extraction did not complete in time")
+
+    # Ensure generation precondition for accepted features.
+    accept = await client.post(f"{BASE}/sow/{sow_id}/extraction-items/accept-all")
+    assert accept.status_code == 200, accept.text
+
+    section_payloads = {
+        "businessContext": {
+            "projectVision": "Deliver a production-grade workflow platform that improves team throughput and reliability." * 2,
+            "businessCriticality": "standard",
+            "currentState": "Current workflow is fragmented across tools.",
+            "desiredFutureState": "Unified process with automation and clear accountability.",
+            "definitionOfSuccess": "Stakeholders approve outcomes with measurable cycle-time reduction.",
+        },
+        "deliveryScope": {
+            "developmentScope": ["Backend", "API", "Integration"],
+            "uiuxDesignScope": "in_scope",
+            "deploymentScope": "cloud",
+            "goLiveScope": "go_live",
+            "dataMigrationScope": "not_in_scope",
+        },
+        "techIntegrations": {
+            "technologyStack": "Python FastAPI React PostgreSQL with cloud deployment and API integrations.",
+        },
+        "timelineTeam": {
+            "startDate": "2026-01-01",
+            "targetEndDate": "2026-06-30",
+            "uatSignOffAuthority": "Jane Doe",
+            "uatSignOffConfirmed": True,
+        },
+        "budgetRisk": {
+            "budgetMinimum": 10000,
+            "budgetMaximum": 20000,
+            "pricingModel": "fixed_price",
+        },
+        "governance": {
+            "nonDiscriminationConfirmed": True,
+            "dataSensitivityLevel": "internal",
+            "personalDataInvolved": "no",
+        },
+        "commercialLegal": {
+            "ipOwnership": "client_owns_all",
+            "sourceCodeOwnership": "client_hosts",
+            "changeRequestProcess": "formal_cr",
+            "thirdPartyCosts": "client_pays",
+        },
+    }
+    for section, payload in section_payloads.items():
+        p = await client.patch(f"{BASE}/sow/{sow_id}/commercial-details/{section}", json=payload)
+        assert p.status_code == 200, p.text
+        m = await client.post(
+            f"{BASE}/sow/{sow_id}/commercial-details/sections/mark-complete",
+            json={"section": section},
+        )
+        assert m.status_code == 200, m.text
+
+    approvers = {
+        "business_owner_approver": "bo@example.com",
+        "final_approver": "fa@example.com",
+    }
+    a = await client.patch(f"{BASE}/sow/{sow_id}/approval-authorities", json=approvers)
+    assert a.status_code == 200, a.text
+
+    g = await client.post(f"{BASE}/sow/{sow_id}/generate", json={"include_extracted_sections": True})
+    assert g.status_code == 202, g.text
+
+    for _ in range(80):
+        gs = await client.get(f"{BASE}/sow/{sow_id}/generation-status")
+        assert gs.status_code == 200, gs.text
+        g_status = gs.json().get("status")
+        if g_status == "complete":
+            break
+        if g_status == "error":
+            pytest.fail(f"Generation failed: {gs.json()}")
+        await asyncio.sleep(0.15)
+    else:
+        pytest.fail("Generation did not complete in time")
+
+    preview = await client.get(f"{BASE}/sow/{sow_id}/preview")
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert isinstance(body.get("hallucination_analysis"), list)
+    assert len(body.get("hallucination_analysis") or []) >= 1
+    assert isinstance(body.get("ai_parse_insights"), dict)
+    assert (body.get("ai_parse_insights") or {}).get("sections_found") is not None
+    qm = body.get("quality_metrics") or {}
+    assert qm.get("confidence") is not None
+    assert qm.get("risk_score") is not None
+    assert qm.get("hallucination_flags") is not None
 
 
 @pytest.mark.asyncio

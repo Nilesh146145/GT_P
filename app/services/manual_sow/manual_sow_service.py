@@ -63,6 +63,32 @@ def map_layer_status(status: str) -> str:
     return {"green": "passed", "amber": "warning", "red": "failed", "grey": "skipped"}.get(status, "skipped")
 
 
+def _layer_hard_flags(layers_raw: List[Dict[str, Any]]) -> List[str]:
+    flags: List[str] = []
+    for layer in layers_raw or []:
+        if layer.get("status") == "red":
+            flags.append(f"layer_{layer.get('layer_id')}_failed")
+    return flags
+
+
+def _build_ai_parse_insights(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Compact AI parse insights derived from extraction report for downstream responses."""
+    rep = (doc or {}).get("extraction_report") or {}
+    ctx = rep.get("contextDetection") or {}
+    return {
+        "context_detection": {
+            "business_objectives": ctx.get("businessObjectives"),
+            "pain_points": ctx.get("painPoints"),
+            "user_context": ctx.get("userContext"),
+        },
+        "sections_found": int(rep.get("sectionsFound") or 0),
+        "gap_score": int(rep.get("gapScore") or 0),
+        "ambiguities": int(rep.get("ambiguities") or 0),
+        "sensitive_data_detected": rep.get("sensitiveDataDetected"),
+        "estimated_review_time": rep.get("estimatedReviewTime"),
+    }
+
+
 def _normalize_email(s: str) -> str:
     return (s or "").strip().lower()
 
@@ -772,6 +798,8 @@ class ManualSowService:
             for s in generated.get("sections", [])[:2]:
                 preview_text += s.get("content", "")[:250]
             preview_text = preview_text[:500]
+            hard_flags = _layer_hard_flags(layers_raw)
+            ai_parse_insights = _build_ai_parse_insights(doc)
             now = _utcnow()
             await col.update_one(
                 {"public_id": public_id},
@@ -783,6 +811,7 @@ class ManualSowService:
                             "hallucination_layers_raw": layers_raw,
                             "risk": risk,
                             "confidence": conf,
+                            "ai_parse_insights": ai_parse_insights,
                             "preview_text": preview_text,
                             "completed_at": now,
                         },
@@ -802,7 +831,7 @@ class ManualSowService:
                             "pattern_match": risk["breakdown"]["pattern_match"],
                             "overall": int(100 - risk.get("risk_score", 50)),
                         },
-                        "hallucination_flags": [],
+                        "hallucination_flags": hard_flags,
                         "updated_at": now,
                     }
                 },
@@ -884,14 +913,18 @@ class ManualSowService:
 
         risk = gen.get("risk") or {}
         conf = gen.get("confidence") or {}
+        ai_parse_insights = gen.get("ai_parse_insights") or _build_ai_parse_insights(doc)
+        hard_flag_count = sum(1 for L in (gen.get("hallucination_layers_raw") or []) if L.get("status") == "red")
         return {
             "sow_id": public_id,
             "quality_metrics": {
-                "confidence": int(conf.get("overall", 0)),
-                "risk_score": int(risk.get("risk_score", 0)),
-                "hallucination_flags": sum(1 for L in (gen.get("hallucination_layers_raw") or []) if L.get("status") == "red"),
+                "confidence": int(conf.get("overall", doc.get("ai_confidence", 0) or 0)),
+                "risk_score": int(risk.get("risk_score", (doc.get("risk_score") or {}).get("overall", 0) or 0)),
+                "hallucination_flags": hard_flag_count,
                 "completeness": int(risk.get("breakdown", {}).get("completeness", 0)),
             },
+            "hallucination_analysis": layers,
+            "ai_parse_insights": ai_parse_insights,
             "is_stale_document": stale,
             "hard_blocks": hard_blocks,
             "preview_text": gen.get("preview_text", ""),
@@ -1295,7 +1328,11 @@ class ManualSowService:
                     "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{public_id}-sec-{i}")),
                     "title": s.get("title"),
                     "content": s.get("content"),
-                    "ai_suggestion": "",
+                    "ai_suggestion": (
+                        (doc.get("generated") or {}).get("preview_text")
+                        or ((doc.get("extraction_report") or {}).get("estimatedReviewTime") and "Review extracted context before final approval.")
+                        or "Derived from AI-parsed source document."
+                    ),
                     "confidence": s.get("confidence"),
                     "order": i + 1,
                 }
