@@ -51,18 +51,6 @@ def _third_party_map(v: Optional[str]) -> str:
     return m.get(v or "", "Client pays all third-party service and licence costs directly")
 
 
-def _warranty_map(v: Optional[str]) -> str:
-    m = {
-        "30_days": "30 days post go-live",
-        "60_days": "60 days",
-        "90_days": "90 days",
-        "6_months": "6 months",
-        "custom": "Custom",
-        "none": "No warranty",
-    }
-    return m.get(v or "", "90 days")
-
-
 def _cr_model_map(v: Optional[str]) -> str:
     m = {
         "formal_cr": "All changes formally priced and approved before work begins",
@@ -435,7 +423,7 @@ def build_wizard_data_from_manual(
         },
         "section_b": {
             "third_party_licensing": _third_party_map(cl.get("thirdPartyCosts")),
-            "warranty_period": _warranty_map(cl.get("warrantyPeriod")),
+            "warranty_period": "Handled via master commercial agreement",
             "change_request_process": {
                 "model": _cr_model_map(cl.get("changeRequestProcess")),
                 "approver_name": cr_approver,

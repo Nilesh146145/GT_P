@@ -155,7 +155,6 @@ async def test_wizard_shape_adapter_builds_steps():
         "commercialLegal": {
             "ipOwnership": "client_owns_all",
             "sourceCodeOwnership": "client_hosts",
-            "warrantyPeriod": "90_days",
             "changeRequestProcess": "formal_cr",
             "thirdPartyCosts": "client_pays",
         },
@@ -197,3 +196,18 @@ async def test_gate_features_required():
 
     assert not gate_step3_to_4([{"category": "features", "review_state": "pending"}])
     assert gate_step3_to_4([{"category": "features", "review_state": "accepted"}])
+
+
+def test_commercial_legal_validation_without_warranty_period():
+    from app.schemas.manual_sow.enums import CommercialSectionKey
+    from app.services.manual_sow.commercial_validation import validate_section
+
+    payload = {
+        "ipOwnership": "client_owns_all",
+        "sourceCodeOwnership": "client_hosts",
+        "changeRequestProcess": "formal_cr",
+        "thirdPartyCosts": "client_pays",
+        "finalApprover": "ignored@example.com",
+    }
+    ok, errors = validate_section(CommercialSectionKey.commercialLegal, payload)
+    assert ok, errors

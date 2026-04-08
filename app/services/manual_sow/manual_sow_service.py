@@ -611,6 +611,12 @@ class ManualSowService:
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404, detail="SOW not found")
+        # Product request: commercialLegal no longer accepts warranty/final-approver fields.
+        if section == CommercialSectionKey.commercialLegal:
+            sanitized = dict(data or {})
+            for key in ("warrantyPeriod", "warranty_period", "finalApprover", "final_approver"):
+                sanitized.pop(key, None)
+            data = sanitized
         cd = dict(doc.get("commercial_details") or {})
         cd[section.value] = {**(cd.get(section.value) or {}), **data}
         sec_stat = dict(doc.get("section_status") or {})

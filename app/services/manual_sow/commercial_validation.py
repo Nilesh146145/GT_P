@@ -109,7 +109,6 @@ def validate_section(
         for fld, allowed in [
             ("ipOwnership", ("client_owns_all", "glimmora_retains_framework", "joint", "custom")),
             ("sourceCodeOwnership", ("client_hosts", "glimmora_hosts_transfer", "client_provides_day_one")),
-            ("warrantyPeriod", ("30_days", "60_days", "90_days", "6_months", "custom", "none")),
             ("changeRequestProcess", ("formal_cr", "threshold_cr", "time_and_materials")),
             ("thirdPartyCosts", ("client_pays", "glimmora_absorbs", "split")),
         ]:
