@@ -3,11 +3,12 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PlanStatus(str, Enum):
     NEW = "NEW"
+    PENDING_KICKOFF = "PENDING_KICKOFF"
     PLAN_REVIEW_REQUIRED = "PLAN_REVIEW_REQUIRED"
     REVISION_IN_PROGRESS = "REVISION_IN_PROGRESS"
     PLAN_CONFIRMED = "PLAN_CONFIRMED"
@@ -75,6 +76,7 @@ class PlanResponse(BaseModel):
     generated_by: str
     generated_at: str
     enterprise_deadline_to_confirm: str
+    plan_exceeds_sow_by_days: Optional[int] = None
 
 
 class ConfirmPlanRequest(BaseModel):
@@ -83,7 +85,17 @@ class ConfirmPlanRequest(BaseModel):
 
 class RevisionRequest(BaseModel):
     requested_by: str
-    revision_notes: str
+    revision_notes: str = Field(..., min_length=30, max_length=2000)
+
+
+class CreateDecompositionPlanRequest(BaseModel):
+    """Create a server-side plan (KO-003 PENDING_KICKOFF) before kick-off releases it to the enterprise."""
+
+    sow_reference: str
+    project_name: str
+    sow_version: str = "1"
+    sow_start: Optional[str] = None
+    sow_end: Optional[str] = None
 
 
 class LockPlanRequest(BaseModel):
@@ -99,6 +111,11 @@ class PlanStatusResponse(BaseModel):
     is_read_only: bool
     is_urgent: bool
     revision_estimated_minutes: Optional[str] = None
+    sow_reference: Optional[str] = None
+    sow_version: Optional[str] = None
+    milestone_count: Optional[int] = None
+    task_count: Optional[int] = None
+    plan_exceeds_sow_by_days: Optional[int] = None
 
 
 class EmptyStateLink(BaseModel):

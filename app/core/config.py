@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     MANUAL_SOW_RATE_API_PER_MINUTE: int = 60
     MANUAL_SOW_AV_SCAN_ENABLED: bool = False  # set True + wire ClamAV / cloud in production
 
+    # Decomposition (Planning §8) — optional webhook secret for AGI to mark revision complete
+    DECOMPOSITION_REVISION_WEBHOOK_SECRET: Optional[str] = None
+
     @staticmethod
     def _blank_to_none(v: Optional[str]) -> Optional[str]:
         if v is None:
@@ -87,6 +90,7 @@ class Settings(BaseSettings):
         "REDIS_URL",
         "TOTP_ENCRYPTION_KEY",
         "NEXTAUTH_SECRET",
+        "DECOMPOSITION_REVISION_WEBHOOK_SECRET",
         mode="before",
     )
     @classmethod

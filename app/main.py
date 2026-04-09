@@ -15,6 +15,7 @@ from app.core.database import close_db, connect_db
 from app.project_portfolio import router as project_portfolio_router
 from app.routers import auth, mfa, oauth, reviewer, wizard, sow, approvals, users, manual_sow_router
 from app.routers.decomposition import decomposition_router
+from app.routers.decomposition.webhook import router as decomposition_webhook_router
 from app.services.manual_sow.errors import ManualSowSpecException
 
 
@@ -101,6 +102,11 @@ async def create_indexes():
     await db["reviewer_recommendations"].create_index([("evidence_id", 1), ("reviewer_user_id", 1)])
     await db["reviewer_projects"].create_index("reviewer_user_id")
     await db["reviewer_projects"].create_index([("project_id", 1), ("reviewer_user_id", 1)])
+
+    await db["decomposition_plans"].create_index("plan_id", unique=True)
+    await db["decomposition_plans"].create_index([("enterprise_profile_id", 1), ("kicked_off", 1)])
+    await db["decomposition_plans"].create_index("enterprise_profile_id")
+    await db["decomposition_plans"].create_index("sow_reference")
 
     if settings.BILLING_API_ENABLED:
         await db["billing_invoices"].create_index("payer_id")
@@ -249,6 +255,7 @@ app.include_router(users.router, prefix=API_PREFIX)
 app.include_router(manual_sow_router.router, prefix=API_PREFIX)
 app.include_router(manual_sow_router.nda_router, prefix=API_PREFIX)
 app.include_router(decomposition_router, prefix=API_PREFIX)
+app.include_router(decomposition_webhook_router, prefix=API_PREFIX)
 app.include_router(project_portfolio_router, prefix=API_PREFIX)
 if settings.BILLING_API_ENABLED:
     from app.billing import router as billing_router

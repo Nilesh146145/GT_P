@@ -1,86 +1,133 @@
+"""Plan Review page, revision modal context, and revised-plan diff (DCP-007: vs previous revision)."""
+
 from __future__ import annotations
 
 from copy import deepcopy
 
 from fastapi import HTTPException
 
+from app.core.database import is_db_connected
+from app.models.decomposition import PlanReviewPageResponse, PlanStatus, PlanSummaryStrip, ReviewChecklistItem, RevisionRound
 from app.schemas.decomposition.revision import RevisionNotesRequest
+from app.services.decomposition import checklist_service, plan_repository, plan_service
 
-_REVISION_DB = {
-    1: {
-        "revision_count": 0,
-        "max_revisions": 3,
-        "status": "PLAN REVIEW REQUIRED",
-    }
-}
+_DCP005 = "This project has not been kicked off yet."
 
-_FLAGGED_TASKS_DB = {1: [1, 2]}
-_TASKS_LOOKUP = {1: "Design API", 2: "Build UI", 3: "Testing"}
 
-_REVISED_PLANS_DB = {
-    1: [
-        {
-            "revision_id": 1,
-            "tasks": [
-                {"id": 1, "name": "Setup Project", "effort": 2},
-                {"id": 2, "name": "Design DB", "effort": 3},
-            ],
-            "notes": "Initial plan",
-        },
-        {
-            "revision_id": 2,
-            "tasks": [
-                {"id": 1, "name": "Setup Project", "effort": 3},
-                {"id": 3, "name": "API Development", "effort": 5},
-            ],
-            "notes": "Updated effort and added API task",
-        },
+async def _load(enterprise_profile_id: str, plan_id: str) -> dict:
+    if not is_db_connected():
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    doc = await plan_repository.find_by_plan_id(plan_id)
+    if doc is None or doc.get("enterprise_profile_id") != enterprise_profile_id:
+        raise HTTPException(status_code=404, detail=f"Plan '{plan_id}' not found.")
+    if not doc.get("kicked_off") or doc.get("status") == "PENDING_KICKOFF":
+        raise HTTPException(status_code=403, detail=_DCP005)
+    return doc
+
+
+def _revision_round_enum(used: int) -> RevisionRound:
+    order = (RevisionRound.ROUND_0, RevisionRound.ROUND_1, RevisionRound.ROUND_2, RevisionRound.ROUND_3)
+    return order[min(max(used, 0), 3)]
+
+
+def _revision_warning_next_submit(used: int) -> str | None:
+    """Banner when about to submit another revision (used = already completed requests)."""
+    if used == 1:
+        return "This is your second revision. One revision round remains after this."
+    if used == 2:
+        return "This is your final revision. If the revised plan still does not meet your needs, GlimmoraTeam Admin will be notified to assist."
+    return None
+
+
+async def get_plan_review_page(enterprise_profile_id: str, plan_id: str) -> PlanReviewPageResponse:
+    doc = await _load(enterprise_profile_id, plan_id)
+    used = int(doc.get("revision_requests_used") or 0)
+    st = str(doc.get("status") or "")
+    summary = plan_service.summary_block(doc)
+    strip = PlanSummaryStrip(
+        total_milestones=summary["total_milestones"],
+        total_tasks=summary["total_tasks"],
+        estimated_effort_days=summary["estimated_total_effort_days"],
+        project_start=str(summary["project_start"]),
+        project_end=str(summary["project_end"]),
+        critical_path_tasks=summary["critical_path_task_count"],
+    )
+    c = doc.get("checklist") or {"item1": False, "item2": False, "item3": False}
+    checklist = [
+        ReviewChecklistItem(
+            item_id="item1",
+            label=checklist_service.REVIEW_LABELS["item1"],
+            is_checked=bool(c.get("item1")),
+        ),
+        ReviewChecklistItem(
+            item_id="item2",
+            label=checklist_service.REVIEW_LABELS["item2"],
+            is_checked=bool(c.get("item2")),
+        ),
+        ReviewChecklistItem(
+            item_id="item3",
+            label=checklist_service.REVIEW_LABELS["item3"],
+            is_checked=bool(c.get("item3")),
+        ),
     ]
-}
+    all_checked = bool(c.get("item1") and c.get("item2") and c.get("item3"))
+    can_rev = st == "PLAN_REVIEW_REQUIRED" and used < plan_service.MAX_REVISION_ROUNDS
+    can_confirm = st == "PLAN_REVIEW_REQUIRED" and all_checked
+    try:
+        plan_status = PlanStatus(st)
+    except ValueError:
+        plan_status = PlanStatus.NEW
+    max_reached = used >= plan_service.MAX_REVISION_ROUNDS
+    return PlanReviewPageResponse(
+        plan_id=plan_id,
+        project_name=str(doc.get("project_name") or ""),
+        sow_reference=str(doc.get("sow_reference") or ""),
+        plan_version=str((doc.get("plan_content") or {}).get("plan_version") or 1),
+        status=plan_status,
+        revision_round=_revision_round_enum(used),
+        revision_label=f"Revision {used} of {plan_service.MAX_REVISION_ROUNDS}",
+        max_revisions_reached=max_reached,
+        revision_warning=(
+            "Maximum revisions reached — GlimmoraTeam Admin has been notified."
+            if max_reached and doc.get("admin_notified_max_revision")
+            else None
+        ),
+        can_request_revision=can_rev,
+        can_confirm_plan=can_confirm,
+        revision_in_progress=st == "REVISION_IN_PROGRESS",
+        summary=strip,
+        checklist=checklist,
+        checklist_complete=all_checked,
+    )
 
 
-def get_plan_review_page(plan_id: str):
-    raise HTTPException(status_code=404, detail=f"Plan '{plan_id}' not found.")
-
-
-def get_revision_modal(plan_id: int) -> dict:
-    if plan_id not in _REVISION_DB:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    revision_data = _REVISION_DB[plan_id]
-    flagged_ids = _FLAGGED_TASKS_DB.get(plan_id, [])
-    flagged_tasks = [{"id": task_id, "name": _TASKS_LOOKUP.get(task_id, "Unknown")} for task_id in flagged_ids]
-
+async def get_revision_modal(enterprise_profile_id: str, plan_id: str) -> dict:
+    doc = await _load(enterprise_profile_id, plan_id)
+    used = int(doc.get("revision_requests_used") or 0)
+    st = str(doc.get("status") or "")
+    flagged = await plan_service.apply_flagged_tasks_for_revision_notes(plan_id, enterprise_profile_id)
+    next_round = min(used + 1, plan_service.MAX_REVISION_ROUNDS)
     return {
-        "revision_count": revision_data["revision_count"],
-        "max_revisions": revision_data["max_revisions"],
-        "status": revision_data["status"],
-        "flagged_tasks": flagged_tasks,
+        "revision_count": used,
+        "next_revision_round": next_round,
+        "max_revisions": plan_service.MAX_REVISION_ROUNDS,
+        "status": st,
+        "flagged_tasks": flagged,
+        "revision_warning_banner": _revision_warning_next_submit(used),
+        "can_submit_revision": st == "PLAN_REVIEW_REQUIRED" and used < plan_service.MAX_REVISION_ROUNDS,
     }
 
 
-def request_revision(plan_id: int, data: RevisionNotesRequest) -> dict:
-    if plan_id not in _REVISION_DB:
-        raise HTTPException(status_code=404, detail="Plan not found")
+async def request_revision(enterprise_profile_id: str, plan_id: str, data: RevisionNotesRequest) -> dict:
+    from app.models.decomposition import RevisionRequest
 
-    revision_data = _REVISION_DB[plan_id]
-    if revision_data["revision_count"] >= revision_data["max_revisions"]:
-        raise HTTPException(status_code=400, detail="Maximum revision limit reached")
-
-    revision_data["revision_count"] += 1
-    revision_data["status"] = "REVISION IN PROGRESS"
-    _FLAGGED_TASKS_DB[plan_id] = []
-
-    return {
-        "message": "Revision request submitted",
-        "revision_count": revision_data["revision_count"],
-        "status": revision_data["status"],
-    }
+    body = RevisionRequest(requested_by="enterprise", revision_notes=data.notes)
+    return await plan_service.request_plan_revision(enterprise_profile_id, plan_id, body)
 
 
-def calculate_diff(old_tasks: list[dict], new_tasks: list[dict]) -> tuple[list[int], list[int], list[int]]:
-    old_map = {task["id"]: task for task in old_tasks}
-    new_map = {task["id"]: task for task in new_tasks}
+def _calculate_diff(old_tasks: list[dict], new_tasks: list[dict]) -> tuple[list[int], list[int], list[int]]:
+    old_map = {int(t["id"]): t for t in old_tasks if t.get("id") is not None}
+    new_map = {int(t["id"]): t for t in new_tasks if t.get("id") is not None}
 
     added: list[int] = []
     modified: list[int] = []
@@ -99,36 +146,34 @@ def calculate_diff(old_tasks: list[dict], new_tasks: list[dict]) -> tuple[list[i
     return added, modified, removed
 
 
-def get_revised_plan(plan_id: int) -> dict:
-    if plan_id not in _REVISED_PLANS_DB:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    versions = _REVISED_PLANS_DB[plan_id]
+async def get_revised_plan(enterprise_profile_id: str, plan_id: str) -> dict:
+    doc = await _load(enterprise_profile_id, plan_id)
+    versions = list(doc.get("revision_snapshots") or [])
     if len(versions) < 2:
-        raise HTTPException(status_code=400, detail="No revision available")
+        raise HTTPException(status_code=400, detail="No revision comparison available (need at least two plan snapshots).")
 
     latest = versions[-1]
     previous = versions[-2]
-    added, modified, removed = calculate_diff(previous["tasks"], latest["tasks"])
+    old_tasks = list(previous.get("tasks") or [])
+    new_tasks = list(latest.get("tasks") or [])
+    added, modified, removed = _calculate_diff(old_tasks, new_tasks)
 
     return {
-        "current_revision": latest["revision_id"],
-        "tasks": deepcopy(latest["tasks"]),
+        "current_revision": latest.get("revision_index", len(versions) - 1),
+        "tasks": deepcopy(new_tasks),
         "changes": {"added": added, "modified": modified, "removed": removed},
         "summary": {"added": len(added), "modified": len(modified), "removed": len(removed)},
+        "revision_notes": latest.get("notes"),
     }
 
 
-def get_revision_detail(plan_id: int, revision_id: int) -> dict:
-    if plan_id not in _REVISED_PLANS_DB:
-        raise HTTPException(status_code=404, detail="Plan not found")
-
-    for version in _REVISED_PLANS_DB[plan_id]:
-        if version["revision_id"] == revision_id:
+async def get_revision_detail(enterprise_profile_id: str, plan_id: str, revision_id: int) -> dict:
+    doc = await _load(enterprise_profile_id, plan_id)
+    for version in doc.get("revision_snapshots") or []:
+        if int(version.get("revision_index", -1)) == revision_id:
             return {
                 "revision_id": revision_id,
-                "notes": version["notes"],
-                "tasks": deepcopy(version["tasks"]),
+                "notes": version.get("notes") or "",
+                "tasks": deepcopy(version.get("tasks") or []),
             }
-
     raise HTTPException(status_code=404, detail="Revision not found")

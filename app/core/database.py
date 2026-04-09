@@ -148,3 +148,7 @@ def get_reviewer_recommendations_collection():
 
 def get_reviewer_projects_collection():
     return get_database()[REVIEWER_PROJECTS_COLLECTION]
+
+
+def get_decomposition_plans_collection():
+    return get_database()["decomposition_plans"]

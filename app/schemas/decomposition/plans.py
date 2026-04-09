@@ -23,7 +23,7 @@ class WithdrawPlanResponse(BaseModel):
 
 
 class RevisionCounterResponse(BaseModel):
-    plan_id: int
+    plan_id: str
     revision: int
 
 

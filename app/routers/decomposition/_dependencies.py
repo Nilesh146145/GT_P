@@ -13,3 +13,11 @@ async def require_enterprise_user(
     if current_user.get("role") != "enterprise":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Enterprise access required")
     return current_user
+
+
+def enterprise_profile_id(current_user: dict) -> str:
+    """Decomposition routes require an enterprise profile scope (KO-003 / §8)."""
+    eid = current_user.get("enterprise_profile_id")
+    if not eid:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Enterprise profile is required.")
+    return str(eid)
