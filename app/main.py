@@ -101,6 +101,20 @@ async def create_indexes():
     await db["reviewer_projects"].create_index("reviewer_user_id")
     await db["reviewer_projects"].create_index([("project_id", 1), ("reviewer_user_id", 1)])
 
+    if settings.BILLING_API_ENABLED:
+        await db["billing_invoices"].create_index("payer_id")
+        await db["billing_invoices"].create_index("status")
+        await db["billing_invoices"].create_index("created_at")
+        await db["billing_invoices"].create_index("due_at")
+        await db["billing_invoice_items"].create_index("invoice_id")
+        await db["billing_payments"].create_index("invoice_id")
+        await db["billing_payments"].create_index("status")
+        await db["billing_payments"].create_index("method")
+        await db["billing_payments"].create_index("created_at")
+        await db["billing_refunds"].create_index("payment_id")
+        await db["billing_refunds"].create_index("invoice_id")
+        await db["billing_refunds"].create_index("created_at")
+
     print("MongoDB indexes created.")
 
 
@@ -232,6 +246,10 @@ app.include_router(users.router, prefix=API_PREFIX)
 app.include_router(manual_sow_router.router, prefix=API_PREFIX)
 app.include_router(manual_sow_router.nda_router, prefix=API_PREFIX)
 app.include_router(decomposition_router, prefix=API_PREFIX)
+if settings.BILLING_API_ENABLED:
+    from app.billing import router as billing_router
+
+    app.include_router(billing_router, prefix=API_PREFIX)
 if settings.REVIEWER_API_ENABLED:
     app.include_router(reviewer.router, prefix=API_PREFIX)
 

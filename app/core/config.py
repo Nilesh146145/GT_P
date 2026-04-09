@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     MIN_BUDGET_INR: float = 500_000.0
     MIN_BUDGET_USD: float = 6_000.0
     REVIEWER_API_ENABLED: bool = False
+    BILLING_API_ENABLED: bool = False
 
     # ── Manual SOW upload flow ────────────────────────────────────────────
     MANUAL_SOW_STORAGE_PATH: str = "uploads/manual_sow"
