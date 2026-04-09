@@ -382,8 +382,9 @@ async def generate_sow(
     - Steps 0, 1, 2, 5, 7, and 8 complete with all required fields
     - Business Owner Approver and Final Approver designated
 
-    Generation process: Apply template → Anchor to business context →
-    Generate clauses → Run hallucination checks → Score risk → Finalise document.
+    **Generation:** When `OPENAI_API_KEY` is set (and `SOW_USE_OPENAI` is true), the SOW body is produced with **OpenAI** using model **`SOW_OPENAI_MODEL`** (default `gpt-4o-mini`). Otherwise a deterministic template is used. On LLM failure, the API falls back to the template automatically.
+
+    Post-generation: hallucination checks → risk score → persist draft.
 
     Returns `sow_id` for use in the AI Draft Review endpoints.
     """

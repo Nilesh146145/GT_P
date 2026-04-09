@@ -167,7 +167,10 @@ class GenerateSOWResponse(BaseModel):
 
 class SOWActionRequest(BaseModel):
     action: str = Field(..., description="submit | request_changes | reject_regenerate")
-    change_notes: Optional[str] = None
+    change_notes: Optional[str] = Field(
+        default=None,
+        description="Required for request_changes (non-empty after trim). Optional for reject_regenerate.",
+    )
 
 
 # ══════════════════════════════════════════════
