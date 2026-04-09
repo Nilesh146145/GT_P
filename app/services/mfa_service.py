@@ -12,6 +12,7 @@ from typing import Optional
 
 import pyotp
 from bson import ObjectId
+from cryptography.exceptions import InvalidTag
 from fastapi import HTTPException, status
 
 from app.core.config import settings
@@ -28,6 +29,38 @@ from app.core.security import get_password_hash, verify_password
 from app.services.reviewer import reviewer_auth_service
 
 logger = logging.getLogger(__name__)
+
+
+def _decrypt_stored_totp_secret(
+    ciphertext: bytes,
+    nonce: bytes,
+    key_id: str,
+    *,
+    context: str,
+) -> str:
+    """
+    Decrypt TOTP material; turn AES-GCM failures into a client-safe error.
+    InvalidTag often means SECRET_KEY / TOTP_ENCRYPTION_KEY changed after enrollment — str(exc) is empty,
+    which previously produced HTTP 500 with blank detail.
+    """
+    try:
+        return decrypt_totp_secret(ciphertext, nonce, key_id)
+    except InvalidTag:
+        logger.error(
+            "TOTP decrypt failed (%s): AES-GCM authentication failed — check SECRET_KEY/TOTP_ENCRYPTION_KEY vs enrollment time",
+            context,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "MFA_SECRET_UNREADABLE",
+                "message": (
+                    "The stored MFA secret cannot be decrypted. This usually means SECRET_KEY or "
+                    "TOTP_ENCRYPTION_KEY was changed after MFA was enabled. Clear MFA for this user in the "
+                    "database (totp credentials + mfa flags) or restore the previous keys, then enroll again."
+                ),
+            },
+        ) from None
 
 
 def _as_utc_aware(dt: datetime) -> datetime:
@@ -133,10 +166,11 @@ async def _load_pending_secret(user_id: str) -> str:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "MFA_SETUP_EXPIRED", "message": "Setup session expired. Start again."},
         )
-    return decrypt_totp_secret(
+    return _decrypt_stored_totp_secret(
         doc["secret_ciphertext"],
         doc["encryption_iv"],
         doc["secret_key_id"],
+        context="setup_pending",
     )
 
 
@@ -245,10 +279,11 @@ async def verify_totp_code(
             detail={"code": "MFA_NOT_CONFIGURED", "message": "MFA is not configured."},
         )
 
-    secret = decrypt_totp_secret(
+    secret = _decrypt_stored_totp_secret(
         doc["secret_ciphertext"],
         doc["encryption_iv"],
         doc["secret_key_id"],
+        context="verify_totp",
     )
     totp = pyotp.TOTP(secret)
     if not totp.verify(code.strip().replace(" ", ""), valid_window=1):
