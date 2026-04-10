@@ -1,0 +1,91 @@
+---
+description: Wizard step endpoints, SOW generation, confidence scoring, hallucination prevention
+globs: ["app/routers/wizard.py", "app/routers/sow.py", "app/services/wizard_service.py", "app/services/confidence.py", "app/services/sow_generator.py", "app/schemas/wizard.py", "app/schemas/step*.py"]
+alwaysApply: false
+---
+
+# Wizard & SOW Generation Rules
+
+## Step Lifecycle
+Steps are stored as subdocuments inside the `wizards` MongoDB document.
+Each step PUT endpoint must:
+1. Validate the incoming payload (Pydantic handles this)
+2. Apply any cross-step validation rules (WIZ-*)
+3. Update the step data in MongoDB via `wizard_service`
+4. Recalculate confidence score
+5. Recalculate hallucination layer statuses
+6. Return the updated wizard state
+
+## Mandatory vs Optional Steps
+```python
+MANDATORY_STEPS = {0, 1, 2, 5, 7, 8}
+OPTIONAL_STEPS  = {3, 4, 6}
+SKIP_PENALTIES  = {3: -8, 4: -7, 6: -5}  # percentage points
+```
+
+## Generation Guard (enforce before POST /wizards/{id}/generate)
+```python
+# Must ALL pass:
+assert all(wizard["steps_complete"][s] for s in MANDATORY_STEPS)  # WIZ-001
+assert wizard["confidence_score"] >= 60  # Low confidence blocks generation
+assert not any_red_hallucination_layers(wizard)                    # Hard block
+```
+
+## Confidence Score Calculation (confidence.py)
+Weights per step — must match exactly:
+```python
+WEIGHTS = {0: 0.20, 1: 0.18, 2: 0.15, 3: 0.08, 4: 0.07,
+           5: 0.12, 6: 0.05, 7: 0.10, 8: 0.05}
+```
+Score = sum of weight for each completed/non-skipped step.
+Skipped steps contribute 0 (penalty already baked in by exclusion).
+
+## Hallucination Layer Logic (confidence.py)
+Layer status: `"green"` | `"yellow"` | `"red"`
+- Red layers hard-block submission
+- Layer 6 (Prohibited Clause) is always red if non-discrimination = False/not set
+
+When adding/modifying layer checks, always return the full 8-layer array with statuses.
+
+## Schema Files — Which Step Lives Where
+| File           | Steps |
+|----------------|-------|
+| step0.py       | Step 0 — Project Context & Discovery |
+| step1_2.py     | Step 1 — Project Identity & Scope, Step 2 — Delivery & Technical Scope |
+| step3_5.py     | Step 3 — Integrations, Step 4 — Timeline & Team, Step 5 — Budget & Risk |
+| step6_8.py     | Step 6 — Quality Standards, Step 7 — Governance & Compliance, Step 8 — Commercial & Legal |
+
+## Budget Validation (WIZ-005)
+```python
+if budget.max_value < budget.min_value:
+    raise HTTPException(400, "Budget max must be ≥ min")
+```
+Platform minimums: INR 500,000 / USD 6,000 — read from `settings.MIN_BUDGET_INR` / `settings.MIN_BUDGET_USD`.
+
+## SOW Generation (sow_generator.py)
+- Only callable after all generation guards pass
+- Creates a new document in `sows` collection
+- Links back to wizard via `wizard_id`
+- Must include `quality_metrics` and `risk_score` fields
+- Payment schedule is hardcoded: M1=30%, M2=35%, M3=35% — never make this configurable
+
+## Approval Pipeline (approvals.py)
+5 stages in order:
+1. Business Owner
+2. GlimmoraTeam Commercial
+3. Legal
+4. Security
+5. Final Approver
+
+Each stage decision: `approve` | `reject` | `request_changes`
+A reject at any stage stops the pipeline (don't auto-advance).
+
+## SOW Actions (sow.py)
+Valid actions on a SOW: `submit` | `request_changes` | `reject_regenerate`
+- `submit` → moves to approval pipeline (stage 1)
+- `reject_regenerate` → only allowed if no red hallucination layers exist (regeneration doesn't remove blocks)
+
+## MongoDB Collections (wizard/sow)
+- `wizards` — indexed on `created_by_user_id`, `enterprise_id`, `status`
+- `sows` — indexed on `wizard_id`, `created_by_user_id`, `status`, `enterprise_id`
+- `approvals` — keyed by `sow_id`

@@ -1,0 +1,324 @@
+"""Tests for Manual SOW intake API (/api/v1/sow)."""
+
+import asyncio
+import io
+import socket
+
+import pytest
+import pytest_asyncio
+from bson import ObjectId
+from httpx import ASGITransport, AsyncClient
+
+from app.core.database import close_db, connect_db
+from app.core.security import get_current_user
+from app.main import app
+
+BASE = "/api/v1"
+
+
+def _mongo_listening(host: str = "127.0.0.1", port: int = 27017, timeout: float = 0.4) -> bool:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+@pytest_asyncio.fixture
+async def client_auth():
+    """Bypass JWT + MFA; requires MongoDB for persistence."""
+    if not _mongo_listening():
+        pytest.skip("MongoDB not reachable on localhost:27017")
+    await connect_db()
+    uid = str(ObjectId())
+
+    async def _fake_user():
+        return {
+            "id": uid,
+            "email": "manual_sow_tester@test.com",
+            "full_name": "Manual SOW Tester",
+            "role": "contributor",
+            "mfa_enabled": False,
+        }
+
+    app.dependency_overrides[get_current_user] = _fake_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            yield c, uid
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await close_db()
+
+
+def _minimal_pdf_bytes() -> bytes:
+    """Tiny valid PDF for upload tests."""
+    return b"""%PDF-1.4
+1 0 obj<<>>endobj
+2 0 obj<</Length 44>>stream
+BT /F1 12 Tf 100 700 Td (Hello) Tj ET
+endstream
+endobj
+3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Contents 2 0 R>>endobj
+xref
+0 4
+trailer<</Size 4/Root 1 0 R>>
+startxref
+100
+%%EOF"""
+
+
+@pytest.mark.asyncio
+async def test_upload_and_list(client_auth):
+    client, _uid = client_auth
+    files = {"file": ("test.pdf", io.BytesIO(_minimal_pdf_bytes()), "application/pdf")}
+    data = {"projectTitle": "My Project Title", "clientOrganisation": "ACME Corp"}
+    res = await client.post(f"{BASE}/sow/upload", files=files, data=data)
+    if res.status_code != 200:
+        pytest.skip(f"MongoDB or storage required: {res.status_code} {res.text}")
+    body = res.json()
+    assert "sow_id" in body
+    assert body["status"] == "parsing"
+
+    r2 = await client.get(f"{BASE}/sow")
+    assert r2.status_code == 200
+    lst = r2.json()
+    assert "sows" in lst
+    assert "pagination" in lst
+
+
+@pytest.mark.asyncio
+async def test_commercial_validate_endpoint(client_auth):
+    """PATCH commercial + validate without full workflow."""
+    client, _uid = client_auth
+    files = {"file": ("x.pdf", io.BytesIO(_minimal_pdf_bytes()), "application/pdf")}
+    data = {"projectTitle": "Title Here Long Enough", "clientOrganisation": "ACME"}
+    up = await client.post(f"{BASE}/sow/upload", files=files, data=data)
+    if up.status_code != 200:
+        pytest.skip(f"MongoDB or storage required: {up.status_code}")
+    sow_id = up.json()["sow_id"]
+
+    payload = {
+        "projectVision": "x" * 50,
+        "businessCriticality": "standard",
+        "currentState": "a",
+        "desiredFutureState": "b",
+        "definitionOfSuccess": "c",
+    }
+    v = await client.post(
+        f"{BASE}/sow/{sow_id}/commercial-details/businessContext/validate",
+        json=payload,
+    )
+    assert v.status_code == 200
+    assert v.json().get("valid") is True
+
+
+@pytest.mark.asyncio
+async def test_manual_generation_preview_includes_ai_derived_fields(client_auth):
+    client, _uid = client_auth
+    files = {"file": ("ai.pdf", io.BytesIO(_minimal_pdf_bytes()), "application/pdf")}
+    data = {"projectTitle": "AI Enrichment Project", "clientOrganisation": "ACME"}
+    up = await client.post(f"{BASE}/sow/upload", files=files, data=data)
+    if up.status_code != 200:
+        pytest.skip(f"MongoDB or storage required: {up.status_code} {up.text}")
+    sow_id = up.json()["sow_id"]
+
+    # Wait for extraction completion.
+    for _ in range(60):
+        st = await client.get(f"{BASE}/sow/{sow_id}/upload-status")
+        assert st.status_code == 200, st.text
+        state = st.json().get("processing_state")
+        if state == "complete":
+            break
+        await asyncio.sleep(0.15)
+    else:
+        pytest.fail("Upload/extraction did not complete in time")
+
+    # Ensure generation precondition for accepted features.
+    accept = await client.post(f"{BASE}/sow/{sow_id}/extraction-items/accept-all")
+    assert accept.status_code == 200, accept.text
+
+    section_payloads = {
+        "businessContext": {
+            "projectVision": "Deliver a production-grade workflow platform that improves team throughput and reliability." * 2,
+            "businessCriticality": "standard",
+            "currentState": "Current workflow is fragmented across tools.",
+            "desiredFutureState": "Unified process with automation and clear accountability.",
+            "definitionOfSuccess": "Stakeholders approve outcomes with measurable cycle-time reduction.",
+        },
+        "deliveryScope": {
+            "developmentScope": ["Backend", "API", "Integration"],
+            "uiuxDesignScope": "in_scope",
+            "deploymentScope": "cloud",
+            "goLiveScope": "go_live",
+            "dataMigrationScope": "not_in_scope",
+        },
+        "techIntegrations": {
+            "technologyStack": "Python FastAPI React PostgreSQL with cloud deployment and API integrations.",
+        },
+        "timelineTeam": {
+            "startDate": "2026-01-01",
+            "targetEndDate": "2026-06-30",
+            "uatSignOffAuthority": "Jane Doe",
+            "uatSignOffConfirmed": True,
+        },
+        "budgetRisk": {
+            "budgetMinimum": 10000,
+            "budgetMaximum": 20000,
+            "pricingModel": "fixed_price",
+        },
+        "governance": {
+            "nonDiscriminationConfirmed": True,
+            "dataSensitivityLevel": "internal",
+            "personalDataInvolved": "no",
+        },
+        "commercialLegal": {
+            "ipOwnership": "client_owns_all",
+            "sourceCodeOwnership": "client_hosts",
+            "changeRequestProcess": "formal_cr",
+            "thirdPartyCosts": "client_pays",
+        },
+    }
+    for section, payload in section_payloads.items():
+        p = await client.patch(f"{BASE}/sow/{sow_id}/commercial-details/{section}", json=payload)
+        assert p.status_code == 200, p.text
+        m = await client.post(
+            f"{BASE}/sow/{sow_id}/commercial-details/sections/mark-complete",
+            json={"section": section},
+        )
+        assert m.status_code == 200, m.text
+
+    approvers = {
+        "business_owner_approver": "bo@example.com",
+        "final_approver": "fa@example.com",
+    }
+    a = await client.patch(f"{BASE}/sow/{sow_id}/approval-authorities", json=approvers)
+    assert a.status_code == 200, a.text
+
+    g = await client.post(f"{BASE}/sow/{sow_id}/generate", json={"include_extracted_sections": True})
+    assert g.status_code == 202, g.text
+
+    for _ in range(80):
+        gs = await client.get(f"{BASE}/sow/{sow_id}/generation-status")
+        assert gs.status_code == 200, gs.text
+        g_status = gs.json().get("status")
+        if g_status == "complete":
+            break
+        if g_status == "error":
+            pytest.fail(f"Generation failed: {gs.json()}")
+        await asyncio.sleep(0.15)
+    else:
+        pytest.fail("Generation did not complete in time")
+
+    preview = await client.get(f"{BASE}/sow/{sow_id}/preview")
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert isinstance(body.get("hallucination_analysis"), list)
+    assert len(body.get("hallucination_analysis") or []) >= 1
+    assert isinstance(body.get("ai_parse_insights"), dict)
+    assert (body.get("ai_parse_insights") or {}).get("sections_found") is not None
+    qm = body.get("quality_metrics") or {}
+    assert qm.get("confidence") is not None
+    assert qm.get("risk_score") is not None
+    assert qm.get("hallucination_flags") is not None
+
+
+@pytest.mark.asyncio
+async def test_wizard_shape_adapter_builds_steps():
+    from app.services.manual_sow.wizard_shape_adapter import build_wizard_data_from_manual
+
+    commercial = {
+        "businessContext": {
+            "projectVision": "A" * 50,
+            "businessCriticality": "standard",
+            "currentState": "x",
+            "desiredFutureState": "y",
+            "definitionOfSuccess": "z",
+        },
+        "deliveryScope": {
+            "developmentScope": ["Backend"],
+            "uiuxDesignScope": "not_in_scope",
+            "deploymentScope": "cloud",
+            "goLiveScope": "go_live",
+            "dataMigrationScope": "not_in_scope",
+        },
+        "techIntegrations": {"technologyStack": "Python FastAPI React"},
+        "timelineTeam": {
+            "startDate": "2026-01-01",
+            "targetEndDate": "2026-12-31",
+            "uatSignOffAuthority": "Jane Doe",
+            "uatSignOffConfirmed": True,
+        },
+        "budgetRisk": {
+            "budgetMinimum": 10000,
+            "budgetMaximum": 50000,
+            "currency": "USD",
+            "pricingModel": "fixed_price",
+        },
+        "governance": {
+            "nonDiscriminationConfirmed": True,
+            "dataSensitivityLevel": "internal",
+            "personalDataInvolved": "no",
+        },
+        "commercialLegal": {
+            "ipOwnership": "client_owns_all",
+            "sourceCodeOwnership": "client_hosts",
+            "changeRequestProcess": "formal_cr",
+            "thirdPartyCosts": "client_pays",
+        },
+    }
+    wd = build_wizard_data_from_manual(
+        title="T",
+        client="C",
+        commercial_details=commercial,
+        feature_module_texts=["Feature A description here"],
+    )
+    assert "step_0" in wd and "step_8" in wd
+    from app.services.sow_generator import generate_sow_content
+
+    out = generate_sow_content(wd)
+    assert out.get("sections")
+
+
+def test_commercial_prefill_from_extraction_passes_section_validation():
+    """AI prefill for businessContext + techIntegrations must satisfy validate_section for mark-complete."""
+    from app.services.manual_sow.commercial_prefill import build_commercial_prefill_from_extraction
+    from app.services.manual_sow.commercial_validation import validate_section
+    from app.schemas.manual_sow.enums import CommercialSectionKey
+
+    items = [
+        {"category": "business_objectives", "text": "Grow revenue by 20% in fiscal year through digital channels."},
+        {"category": "features", "text": "Python FastAPI backend with React frontend and PostgreSQL database."},
+    ]
+    report = {"contextDetection": {"businessObjectives": "PRESENT"}}
+    bc, ti = build_commercial_prefill_from_extraction(items, report, title="Proj", client="Org")
+    ok, err = validate_section(CommercialSectionKey.businessContext, bc)
+    assert ok, err
+    ok2, err2 = validate_section(CommercialSectionKey.techIntegrations, ti)
+    assert ok2, err2
+
+
+@pytest.mark.asyncio
+async def test_gate_features_required():
+    from app.services.manual_sow.gates import gate_step3_to_4
+
+    assert not gate_step3_to_4([{"category": "features", "review_state": "pending"}])
+    assert gate_step3_to_4([{"category": "features", "review_state": "accepted"}])
+
+
+def test_commercial_legal_validation_without_warranty_period():
+    from app.schemas.manual_sow.enums import CommercialSectionKey
+    from app.services.manual_sow.commercial_validation import validate_section
+
+    payload = {
+        "ipOwnership": "client_owns_all",
+        "sourceCodeOwnership": "client_hosts",
+        "changeRequestProcess": "formal_cr",
+        "thirdPartyCosts": "client_pays",
+        "finalApprover": "ignored@example.com",
+    }
+    ok, errors = validate_section(CommercialSectionKey.commercialLegal, payload)
+    assert ok, errors
