@@ -96,18 +96,26 @@ class CurrentUserResponse(BaseModel):
     email: EmailStr
     email_verified: bool = Field(alias="emailVerified")
     phone_verified: bool = Field(alias="phoneVerified")
+    phone: Optional[str] = Field(default=None, alias="phoneNumber")
     role: str = "contributor"
     requires_password_change: bool = Field(default=False, alias="requiresPasswordChange")
     is_first_login: bool = Field(default=False, alias="isFirstLogin")
     mfa_enabled: bool = Field(default=False, alias="mfaEnabled")
     mfa_enrollment_required: bool = Field(default=False, alias="mfaEnrollmentRequired")
     auth_pending: bool = Field(default=False, alias="authPending")
+    enterprise_profile: Optional["EnterpriseCompanyProfile"] = Field(default=None, alias="enterpriseProfile")
 
     model_config = ConfigDict(
         from_attributes=True,
         populate_by_name=True,
         ser_json_by_alias=True,
     )
+
+
+# Resolve forward ref for nested enterprise profile (avoids circular import at class body time).
+from app.schemas.enterprise_auth import EnterpriseCompanyProfile  # noqa: E402
+
+CurrentUserResponse.model_rebuild()
 
 
 class SessionItem(BaseModel):

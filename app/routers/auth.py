@@ -92,6 +92,13 @@ async def me(current_user: dict = Depends(get_current_user_for_me)) -> CurrentUs
     auth_pending = u.pop("_auth_token_type", None) == "mfa_pending"
     u.pop("_mfa_flow", None)
     uid = str(u["_id"])
+    phone_raw = u.get("phone")
+    phone_val = phone_raw.strip() if isinstance(phone_raw, str) and phone_raw.strip() else None
+
+    enterprise_profile = None
+    if u.get("role") == "enterprise" and u.get("enterprise_profile_id"):
+        enterprise_profile = await enterprise_auth_service.get_enterprise_company_profile(str(u["enterprise_profile_id"]))
+
     return CurrentUserResponse(
         id=uid,
         firstName=u.get("first_name", ""),
@@ -99,12 +106,14 @@ async def me(current_user: dict = Depends(get_current_user_for_me)) -> CurrentUs
         email=u["email"],
         emailVerified=u.get("email_verified", False),
         phoneVerified=u.get("phone_verified", False),
+        phoneNumber=phone_val,
         role=u.get("role", "contributor"),
         requiresPasswordChange=reviewer_auth_service.reviewer_requires_password_change(u),
         isFirstLogin=bool(u.get("is_first_login", False)),
         mfaEnabled=bool(u.get("mfa_enabled", False)),
         mfaEnrollmentRequired=mfa_service.mfa_enrollment_required(u),
         authPending=auth_pending,
+        enterpriseProfile=enterprise_profile,
     )
 
 

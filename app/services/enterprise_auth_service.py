@@ -14,12 +14,45 @@ from datetime import datetime
 
 from fastapi import HTTPException
 
-from app.core.database import get_db, get_users_collection
+from bson import ObjectId
+from bson.errors import InvalidId
+
+from app.core.database import get_db, get_enterprises_collection, get_users_collection
 from app.core.security import get_password_hash
 from app.schemas.auth import AuthUser
-from app.schemas.enterprise_auth import EnterpriseRegisterRequest, EnterpriseRegisterResponse
+from app.schemas.enterprise_auth import (
+    EnterpriseCompanyProfile,
+    EnterpriseRegisterRequest,
+    EnterpriseRegisterResponse,
+)
 
 logger = logging.getLogger(__name__)
+
+
+async def get_enterprise_company_profile(enterprise_profile_id: str) -> EnterpriseCompanyProfile | None:
+    """Load public company fields for GET /auth/me when user is enterprise."""
+    try:
+        oid = ObjectId(enterprise_profile_id)
+    except InvalidId:
+        return None
+    doc = await get_enterprises_collection().find_one({"_id": oid})
+    if not doc:
+        return None
+    return EnterpriseCompanyProfile(
+        enterprise_profile_id=str(doc["_id"]),
+        org_name=doc.get("org_name") or "",
+        org_type=doc.get("org_type") or "",
+        org_type_other=doc.get("org_type_other"),
+        industry=doc.get("industry") or "",
+        industry_other=doc.get("industry_other"),
+        company_size=doc.get("company_size") or "",
+        website=doc.get("website"),
+        hq_country=doc.get("hq_country"),
+        hq_city=doc.get("hq_city"),
+        admin_title=doc.get("admin_title") or "",
+        admin_dept=doc.get("admin_dept"),
+        incorporation_country=doc.get("incorporation_country"),
+    )
 
 
 async def register_enterprise(payload: EnterpriseRegisterRequest) -> EnterpriseRegisterResponse:

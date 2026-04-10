@@ -4,7 +4,7 @@ Enterprise auth schemas — derived from app/schemas/enterprise_auth.py.
 
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.schemas.auth import AuthUser
 
@@ -54,3 +54,23 @@ class EnterpriseRegisterRequest(BaseModel):
 class EnterpriseRegisterResponse(BaseModel):
     user: AuthUser
     enterprise_profile_id: str
+
+
+class EnterpriseCompanyProfile(BaseModel):
+    """Company details for enterprise users on GET /auth/me (profile section)."""
+
+    enterprise_profile_id: str = Field(alias="enterpriseProfileId")
+    org_name: str = Field(default="", alias="orgName")
+    org_type: str = Field(default="", alias="orgType")
+    org_type_other: Optional[str] = Field(default=None, alias="orgTypeOther")
+    industry: str = ""
+    industry_other: Optional[str] = Field(default=None, alias="industryOther")
+    company_size: str = Field(default="", alias="companySize")
+    website: Optional[str] = None
+    hq_country: Optional[str] = Field(default=None, alias="hqCountry")
+    hq_city: Optional[str] = Field(default=None, alias="hqCity")
+    admin_title: str = Field(default="", alias="adminTitle")
+    admin_dept: Optional[str] = Field(default=None, alias="adminDept")
+    incorporation_country: Optional[str] = Field(default=None, alias="incorporationCountry")
+
+    model_config = ConfigDict(populate_by_name=True, ser_json_by_alias=True)
