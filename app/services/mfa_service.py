@@ -4,6 +4,8 @@ Production TOTP MFA (RFC 6238): setup, verify, recovery, disable.
 
 from __future__ import annotations
 
+import base64
+import io
 import logging
 import re
 import secrets
@@ -29,6 +31,26 @@ from app.core.security import get_password_hash, verify_password
 from app.services.reviewer import reviewer_auth_service
 
 logger = logging.getLogger(__name__)
+
+
+def qr_png_base64_for_otpauth_uri(otpauth_uri: str) -> str | None:
+    """
+    Render the provisioning URI as a PNG (base64, no data-URL prefix).
+    Lets clients use <img src={`data:image/png;base64,${qrCodePngBase64}`} /> without
+    client-side QR libraries or third-party chart URLs (often blocked in production).
+    """
+    if not otpauth_uri or not otpauth_uri.strip().startswith("otpauth://"):
+        return None
+    try:
+        import segno
+
+        qr = segno.make(otpauth_uri.strip(), error="m")
+        buf = io.BytesIO()
+        qr.save(buf, kind="png", scale=6)
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        logger.exception("MFA QR PNG generation failed (segno)")
+        return None
 
 
 def _decrypt_stored_totp_secret(

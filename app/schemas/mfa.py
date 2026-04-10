@@ -2,9 +2,9 @@
 MFA API schemas — TOTP setup, verify, recovery, status.
 """
 
-from typing import List
+from typing import Any, List
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from app.schemas.auth import AuthUser
 
@@ -22,8 +22,32 @@ class MfaDisableRequest(BaseModel):
 
 
 class MfaSetupInitResponse(BaseModel):
-    otpauth_uri: str
-    secret_base32: str
+    """
+    TOTP enrollment payload. JSON includes both snake_case and camelCase keys so
+    Next.js/TS clients using otpAuthUri / secretBase32 receive data without mapping.
+    """
+
+    otpauth_uri: str = Field(..., description="otpauth:// provisioning URI for authenticator apps")
+    secret_base32: str = Field(..., description="Base32 secret for manual entry")
+    qr_code_png_base64: str | None = Field(
+        default=None,
+        description="PNG of the QR code, raw base64 (prefix with data:image/png;base64, for img src)",
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @model_serializer
+    def _serialize(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "otpauth_uri": self.otpauth_uri,
+            "secret_base32": self.secret_base32,
+            "otpAuthUri": self.otpauth_uri,
+            "secretBase32": self.secret_base32,
+        }
+        if self.qr_code_png_base64:
+            out["qr_code_png_base64"] = self.qr_code_png_base64
+            out["qrCodePngBase64"] = self.qr_code_png_base64
+        return out
 
 
 class MfaSetupConfirmResponse(BaseModel):

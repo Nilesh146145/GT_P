@@ -20,6 +20,7 @@ pydantic-settings>=2.2.0
 
 # MFA (TOTP) — stub ready, wire in production
 pyotp>=2.9.0
+segno>=1.6.0              # QR PNG for MFA setup (no external chart APIs)
 
 # Testing
 pytest>=8.2.0

@@ -9,7 +9,8 @@
  *
  * MFA setup (enterprise first login or contributor from profile):
  * - Authorization: Bearer <mfa_pending_token or access_token>
- * - POST /api/v1/auth/mfa/setup/init → show otpauth_uri (QR) + secret_base32
+ * - POST /api/v1/auth/mfa/setup/init → use otpAuthUri (camelCase) or otpauth_uri;
+ *   secretBase32 / secret_base32; optional qrCodePngBase64 for <img src="data:image/png;base64,...">
  * - POST /api/v1/auth/mfa/setup/confirm { code } → save recovery_codes once, then store access + refresh
  *
  * MFA verify (re-login):

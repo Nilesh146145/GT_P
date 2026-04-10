@@ -45,7 +45,12 @@ async def mfa_setup_init(
     ip, ua = _client_meta(request)
     user = principal["user"]
     otpauth_uri, secret = await mfa_service.init_setup(user, ip_address=ip, user_agent=ua)
-    return MfaSetupInitResponse(otpauth_uri=otpauth_uri, secret_base32=secret)
+    qr_b64 = mfa_service.qr_png_base64_for_otpauth_uri(otpauth_uri)
+    return MfaSetupInitResponse(
+        otpauth_uri=otpauth_uri,
+        secret_base32=secret,
+        qr_code_png_base64=qr_b64,
+    )
 
 
 @router.post("/setup/confirm", response_model=MfaSetupConfirmResponse, summary="Confirm TOTP enrollment")
