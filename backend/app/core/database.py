@@ -1,5 +1,6 @@
 import logging
 
+from fastapi import HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.core.config import settings
@@ -51,7 +52,18 @@ def is_db_connected() -> bool:
 
 def get_database():
     if client is None:
-        raise RuntimeError("Database not initialized")
+        # Avoid opaque 500s when register/login hit Mongo without a live server.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "DATABASE_UNAVAILABLE",
+                "message": (
+                    "MongoDB is not connected. Start MongoDB (e.g. "
+                    "`docker run -d -p 27017:27017 mongo:7`) or set MONGODB_URL in "
+                    "backend/.env and restart the API."
+                ),
+            },
+        )
     return client[settings.DATABASE_NAME]
 
 

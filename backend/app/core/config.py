@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # Decomposition (Planning §8) — optional webhook secret for AGI to mark revision complete
     DECOMPOSITION_REVISION_WEBHOOK_SECRET: Optional[str] = None
 
+    # Contributor module — NEVER enable in production (bypasses JWT for /api/contributor/*)
+    AUTH_ALLOW_HEADER_FALLBACK: bool = False
+
     @staticmethod
     def _blank_to_none(v: Optional[str]) -> Optional[str]:
         if v is None:

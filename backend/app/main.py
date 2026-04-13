@@ -12,6 +12,7 @@ import logging
 
 from app.core.config import settings
 from app.core.database import close_db, connect_db
+from app.contributor import router as contributor_router
 from app.project_portfolio import router as project_portfolio_router
 from app.routers import auth, mfa, oauth, reviewer, wizard, sow, approvals, users, manual_sow_router
 from app.routers.decomposition import decomposition_router
@@ -29,6 +30,13 @@ _log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_db()
+    try:
+        from app.contributor import demo_bootstrap
+
+        demo_bootstrap.install_temp_api_db_layout()
+        demo_bootstrap.apply_all_temp_demo_seeds()
+    except Exception:
+        _log.exception("Contributor demo bootstrap failed; continuing startup")
     try:
         await create_indexes()
     except Exception:
@@ -248,6 +256,7 @@ API_PREFIX = "/api/v1"
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(oauth.router, prefix=API_PREFIX)
 app.include_router(mfa.router, prefix=API_PREFIX)
+app.include_router(contributor_router)
 app.include_router(wizard.router, prefix=API_PREFIX)
 app.include_router(sow.router, prefix=API_PREFIX)
 app.include_router(approvals.router, prefix=API_PREFIX)
@@ -277,6 +286,9 @@ def custom_openapi():
         description=app.description,
         routes=app.routes,
     )
+    from app.contributor.openapi import patch_contributor_paths_security
+
+    patch_contributor_paths_security(openapi_schema)
     schemes = openapi_schema.get("components", {}).get("securitySchemes") or {}
     for scheme in schemes.values():
         if scheme.get("type") == "http" and scheme.get("scheme") == "bearer":
