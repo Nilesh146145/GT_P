@@ -1,8 +1,8 @@
 """
 Derive commercial-details sections from parsed extraction items + report (manual SOW intake).
 
-Seeds businessContext and techIntegrations so GET /sow/{id}/commercial-details returns
-AI-grounded defaults; users may override via PATCH.
+Seeds businessContext, techIntegrations, and deliveryScope so GET /sow/{id}/commercial-details
+returns extraction-grounded defaults; users may override via PATCH.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from app.schemas.manual_sow.enums import ExtractionCategory
+from app.schemas.manual_sow.manual_sow_platform_type import normalize_manual_sow_platform_type
 
 # Minimum lengths enforced by commercial_validation.validate_section
 _MIN_PROJECT_VISION = 50
@@ -231,15 +232,49 @@ def merge_gap_fill_section(seed: Dict[str, Any], existing: Optional[Dict[str, An
     return cur
 
 
+def merge_delivery_scope_with_repair(
+    seed: Dict[str, Any], existing: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Like merge_gap_fill_section, but also replaces values that fail validate_section (wrong enums,
+    empty developmentScope, etc.) so prefill can fix legacy or client-sent invalid payloads.
+    """
+    from app.schemas.manual_sow.enums import CommercialSectionKey
+    from app.services.manual_sow.commercial_validation import validate_section
+
+    cur = merge_gap_fill_section(seed, existing)
+    norm_pt = normalize_manual_sow_platform_type(
+        (cur or {}).get("platformType") or (cur or {}).get("platform_type")
+    )
+    if norm_pt:
+        cur = dict(cur or {})
+        cur["platformType"] = norm_pt
+        cur.pop("platform_type", None)
+    ok, errors = validate_section(CommercialSectionKey.deliveryScope, cur)
+    if ok:
+        return cur
+    fixed = dict(cur)
+    for key in errors:
+        if key in seed and not _is_empty(seed.get(key)):
+            fixed[key] = seed[key]
+    ok2, _ = validate_section(CommercialSectionKey.deliveryScope, fixed)
+    if ok2:
+        return fixed
+    return merge_gap_fill_section(seed, {})
+
+
 def merge_commercial_details_prefill(
     existing: Optional[Dict[str, Any]],
     seed_bc: Dict[str, Any],
     seed_ti: Dict[str, Any],
+    seed_ds: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Merge prefill seeds into commercial_details without overwriting user-supplied fields."""
     cd = dict(existing or {})
     cd["businessContext"] = merge_gap_fill_section(seed_bc, cd.get("businessContext"))
     cd["techIntegrations"] = merge_gap_fill_section(seed_ti, cd.get("techIntegrations"))
+    if seed_ds:
+        cd["deliveryScope"] = merge_delivery_scope_with_repair(seed_ds, cd.get("deliveryScope"))
     return cd
 
 
@@ -253,14 +288,85 @@ def commercial_needs_prefill(commercial_details: Optional[Dict[str, Any]]) -> bo
     return len(str(pv).strip()) < _MIN_PROJECT_VISION or len(str(ts).strip()) < _MIN_TECH_STACK
 
 
+def build_delivery_scope_platform_seed(items: List[Dict[str, Any]], report: Dict[str, Any]) -> Dict[str, Any]:
+    """Seed ``deliveryScope.platformType`` from extraction report or item text (camelCase)."""
+    from app.services.manual_sow.platform_detection import infer_platform_type_from_text
+
+    pt = (report or {}).get("platformType")
+    if not pt or not str(pt).strip():
+        pt = infer_platform_type_from_text(_join_item_texts(items))
+    return {"platformType": str(pt).strip()}
+
+
+def build_delivery_scope_seed(items: List[Dict[str, Any]], report: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Full deliveryScope seed so extraction-based prefill passes validate_section (mark-complete).
+
+    Only fills keys that merge_gap_fill_section applies when missing/empty; user PATCH wins.
+    """
+    text = _join_item_texts(items).lower()
+    out: Dict[str, Any] = dict(build_delivery_scope_platform_seed(items, report))
+
+    dev: List[str] = []
+    if any(
+        k in text
+        for k in (
+            "frontend",
+            "react",
+            "angular",
+            "vue",
+            "next",
+            "spa ",
+            " web",
+            "web ",
+            "website",
+            "dashboard",
+            "portal",
+        )
+    ):
+        dev.append("Frontend")
+    if any(k in text for k in ("mobile", "ios", "android", "react native", "flutter", "native app")):
+        if "Frontend" not in dev:
+            dev.append("Frontend")
+    if any(k in text for k in ("backend", "api", "server", "database", "fastapi", "django", "node", "microservice")):
+        dev.append("Backend")
+    if any(
+        k in text
+        for k in ("integration", "integrate", "third-party", "third party", "webhook", "wearable", "external system")
+    ):
+        dev.append("Integration")
+    if not dev:
+        dev = ["Backend", "Frontend"]
+    out["developmentScope"] = dev
+
+    out["uiuxDesignScope"] = (
+        "in_scope"
+        if any(k in text for k in (" ui", "ux", "design", "figma", "wireframe", "prototype", "responsive", "mockup"))
+        or "frontend" in text
+        or "mobile" in text
+        else "not_in_scope"
+    )
+    out["deploymentScope"] = (
+        "cloud" if any(k in text for k in ("aws", "azure", "gcp", "cloud", "saas", "kubernetes", "docker", "host")) else "not_in_scope"
+    )
+    out["goLiveScope"] = (
+        "go_live_hypercare"
+        if any(k in text for k in ("hypercare", "hyper care", "warranty", "support window", "post-go-live"))
+        else "go_live"
+    )
+    out["dataMigrationScope"] = "in_scope" if "migrat" in text else "not_in_scope"
+    return out
+
+
 def build_commercial_prefill_from_extraction(
     items: List[Dict[str, Any]],
     report: Dict[str, Any],
     *,
     title: str,
     client: str,
-) -> tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     return (
         build_business_context_seed(items, report, title=title, client=client),
         build_tech_integrations_seed(items, report),
+        build_delivery_scope_seed(items, report),
     )

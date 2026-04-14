@@ -4,6 +4,8 @@ Transforms wizard step data into a structured, clause-rich Statement of Work.
 In production this would call an LLM. Here we generate a well-structured template
 seeded with all captured inputs.
 """
+from __future__ import annotations
+
 
 import json
 from datetime import datetime

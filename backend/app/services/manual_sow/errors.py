@@ -23,7 +23,7 @@ def spec_error_json(
     status_code: int,
     error: str,
     error_code: str,
-    details: Optional[dict[str, str]] = None,
+    details: Optional[dict[str, Any]] = None,
     request_id: Optional[str] = None,
 ) -> dict[str, Any]:
     rid = request_id or str(uuid.uuid4())
@@ -38,7 +38,7 @@ def spec_error_json(
     return body
 
 
-def raise_spec(status_code: int, error: str, error_code: str, details: Optional[dict[str, str]] = None) -> None:
+def raise_spec(status_code: int, error: str, error_code: str, details: Optional[dict[str, Any]] = None) -> None:
     raise ManualSowSpecException(
         status_code,
         spec_error_json(
@@ -55,7 +55,7 @@ def spec_error_response(
     status_code: int,
     error: str,
     error_code: str,
-    details: Optional[dict[str, str]] = None,
+    details: Optional[dict[str, Any]] = None,
     request_id: Optional[str] = None,
 ) -> JSONResponse:
     return JSONResponse(

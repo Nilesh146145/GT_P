@@ -1,5 +1,7 @@
 """Decomposition / Planning §8 API — Mongo-backed lifecycle."""
 
+from __future__ import annotations
+
 import importlib
 import os
 import socket

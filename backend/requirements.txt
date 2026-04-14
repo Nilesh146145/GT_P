@@ -17,6 +17,10 @@ redis>=5.0.0                # optional; MFA rate limits fall back to in-process 
 # Config / validation
 pydantic[email]>=2.7.0
 pydantic-settings>=2.2.0
+# Explicit: OpenAPI generation imports EmailStr → pydantic checks metadata for this dist;
+# if missing, /openapi.json returns 500 with detail "email-validator".
+email-validator>=2.0.0,<3
+eval-type-backport>=0.2.0  # Pydantic + Python 3.9: evaluate str | None style hints
 
 # MFA (TOTP) — stub ready, wire in production
 pyotp>=2.9.0
@@ -30,3 +34,6 @@ httpx>=0.27.0
 pypdf>=4.0.0
 python-docx>=1.1.0
 reportlab>=4.0.0
+
+# Manual SOW — optional AI tech stack (requires OPENAI_API_KEY)
+openai>=1.40.0

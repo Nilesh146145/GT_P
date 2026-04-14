@@ -1,6 +1,8 @@
 """
 Contributor registration — full profile stored under contributor_profile on the user document.
 """
+from __future__ import annotations
+
 
 import logging
 from datetime import datetime, timezone

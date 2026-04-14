@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, Path
 
 from app.dependencies.reviewer import require_reviewer_user

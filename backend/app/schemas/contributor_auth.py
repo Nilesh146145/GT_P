@@ -1,6 +1,8 @@
 """
 Contributor registration — full profile + legal acknowledgments (MFA optional).
 """
+from __future__ import annotations
+
 
 from datetime import date
 from enum import Enum
