@@ -1,4 +1,8 @@
-from datetime import UTC, datetime
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+UTC = timezone.utc  # Python 3.9 (datetime.UTC is 3.11+)
 
 from app.project_portfolio.schemas.timeline import (
     MilestoneDetail,

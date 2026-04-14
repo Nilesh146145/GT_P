@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from app.services.decomposition import (
     checklist_service,
     plan_service,

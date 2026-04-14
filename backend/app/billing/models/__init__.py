@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from app.billing.models.billing import (
     BILLING_INVOICES_COLLECTION,
     BILLING_INVOICE_ITEMS_COLLECTION,

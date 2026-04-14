@@ -8,6 +8,8 @@ Current mode: DRY_RUN — OTPs are logged/returned in the response instead
 of being sent via SMS/email. Flip settings.OTP_DRY_RUN = False and wire
 in a real gateway (Twilio, SendGrid, etc.) for production.
 """
+from __future__ import annotations
+
 
 import random
 import string

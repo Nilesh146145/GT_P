@@ -2,20 +2,25 @@
 GlimmoraTeam — AI SOW Generator API
 FastAPI + MongoDB backend for the 10-step SOW Wizard.
 """
+from __future__ import annotations
+
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_oauth2_redirect_html
+from starlette.requests import Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import logging
 
 from app.core.config import settings
-from app.core.database import close_db, connect_db
+from app.core.database import DatabaseNotAvailable, close_db, connect_db
 from app.project_portfolio import router as project_portfolio_router
 from app.routers import auth, mfa, oauth, reviewer, wizard, sow, approvals, users, manual_sow_router
 from app.routers.decomposition import decomposition_router
 from app.routers.decomposition.webhook import router as decomposition_webhook_router
+from app.openapi_docs import get_swagger_ui_html_with_tag_order
 from app.services.manual_sow.errors import ManualSowSpecException
 
 
@@ -26,8 +31,35 @@ from app.services.manual_sow.errors import ManualSowSpecException
 _log = logging.getLogger(__name__)
 
 
+def _check_email_validator_for_openapi() -> None:
+    """
+    Pydantic EmailStr triggers importlib.metadata.version('email-validator') when building
+    /openapi.json. If the module imports but metadata is missing, Swagger shows 500 with
+    detail \"email-validator\".
+    """
+    try:
+        import email_validator  # noqa: F401
+    except ImportError:
+        _log.critical(
+            "OpenAPI/Swagger will fail: email_validator not importable. "
+            "Run: .venv/bin/pip install 'email-validator>=2.0.0,<3'"
+        )
+        return
+    try:
+        from importlib.metadata import version
+
+        version("email-validator")
+    except Exception:
+        _log.warning(
+            "pip metadata for email-validator missing or unreadable (OpenAPI still works: "
+            "see app/__init__.py patch). For a clean venv: pip install --force-reinstall "
+            "'email-validator>=2.0.0,<3'"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _check_email_validator_for_openapi()
     await connect_db()
     try:
         await create_indexes()
@@ -126,6 +158,70 @@ async def create_indexes():
 
 
 # ──────────────────────────────────────────────
+# OPENAPI / SWAGGER — tag order: auth first, then SOW flow (wizard → AI review → manual)
+# ──────────────────────────────────────────────
+
+_OPENAPI_TAGS = [
+    {"name": "Authentication", "description": "Login, register, tokens, refresh."},
+    {"name": "OAuth", "description": "Google / Microsoft SSO (after auth concepts)."},
+    {"name": "MFA", "description": "TOTP and MFA verification flows."},
+    {
+        "name": "Users & Enterprise",
+        "description": "Profiles and enterprise settings.",
+    },
+    {
+        "name": "SOW Wizard",
+        "description": "**Primary path — start here:** 10-step wizard under **`/api/v1/wizards`**.",
+    },
+    {
+        "name": "AI Draft Review",
+        "description": (
+            "**After the wizard:** draft SOWs under **`/api/v1/sows`** (plural). "
+            "Review and refine AI-generated content before approvals."
+        ),
+    },
+    {
+        "name": "Approval Pipeline",
+        "description": "Approval stages for wizard-generated SOWs.",
+    },
+    {
+        "name": "Manual SOW",
+        "description": (
+            "**Alternate / late path:** upload an existing document under **`/api/v1/sow`** (singular) — "
+            "typically **after** exploring AI Draft Review, not instead of it. "
+            "Commercial details: **`GET .../commercial-details`** may auto-fill **`aiGeneratedText`** "
+            "in the response body when Section C unlocks (requires **`OPENAI_API_KEY`**); no separate generate route."
+        ),
+    },
+    {"name": "NDA", "description": "NDA acceptance helpers."},
+    {"name": "Reviewer", "description": "Reviewer workspace APIs."},
+    {"name": "Billing", "description": "Invoices and payments (if enabled)."},
+    {"name": "portfolio", "description": "Project portfolio."},
+    {"name": "evidence", "description": "Portfolio evidence."},
+    {"name": "projects", "description": "Portfolio projects."},
+    {"name": "team", "description": "Portfolio team."},
+    {"name": "milestones", "description": "Portfolio milestones."},
+    {"name": "escalations", "description": "Portfolio escalations."},
+    {"name": "commercial", "description": "Portfolio commercial tab."},
+    {"name": "payments", "description": "Portfolio payments."},
+    {"name": "Plans", "description": "Decomposition plans."},
+    {"name": "Plan Actions", "description": "Plan actions."},
+    {"name": "Tasks", "description": "Decomposition tasks."},
+    {"name": "Checklist", "description": "Decomposition checklist."},
+    {"name": "Summary", "description": "Plan summary."},
+    {"name": "Task Detail", "description": "Task detail."},
+    {"name": "Revision", "description": "Plan revision."},
+    {"name": "Revised Plan", "description": "Revised plan output."},
+    {"name": "Revision Detail", "description": "Revision detail."},
+    {"name": "Plan Review Page", "description": "Plan review UI API."},
+    {"name": "Internal — Decomposition", "description": "Internal webhooks (ops)."},
+    {"name": "Health", "description": "Liveness and health."},
+]
+
+_OPENAPI_TAG_ORDER = [t["name"] for t in _OPENAPI_TAGS]
+
+
+# ──────────────────────────────────────────────
 # APP INSTANCE
 # ──────────────────────────────────────────────
 
@@ -135,6 +231,13 @@ app = FastAPI(
 ## AI Statement of Work Generator — 10-Step Wizard API
 
 This API powers the complete SOW generation platform for GlimmoraTeam.
+
+In **Swagger (`/docs`)**, tags are ordered: **Authentication → OAuth → MFA → Users & Enterprise → SOW Wizard → AI Draft Review → …**
+
+### Recommended product flow
+1. **SOW Wizard** — **`/api/v1/wizards`** (build the draft step by step).
+2. **AI Draft Review** — **`/api/v1/sows`** (review / refine the AI-generated SOW).
+3. **Manual SOW (optional)** — **`/api/v1/sow`** (upload a document **after** or **beside** the AI path — not the first step in the journey).
 
 ### Wizard Steps
 
@@ -164,7 +267,12 @@ This API powers the complete SOW generation platform for GlimmoraTeam.
 ### Approval Pipeline
 Business Owner → GlimmoraTeam Commercial → Legal → Security → Final Approver
     """,
-    version="1.0.0",
+    version="1.0.1",
+    openapi_tags=_OPENAPI_TAGS,
+    swagger_ui_parameters={
+        "filter": True,
+        "persistAuthorization": True,
+    },
     contact={
         "name": "GlimmoraTeam Engineering",
         "email": "engineering@glimmora.team",
@@ -173,7 +281,7 @@ Business Owner → GlimmoraTeam Commercial → Legal → Security → Final Appr
         "name": "Proprietary",
     },
     lifespan=lifespan,
-    docs_url="/docs",
+    docs_url=None,
     redoc_url="/redoc",
     openapi_url="/openapi.json",
 )
@@ -225,6 +333,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+@app.exception_handler(DatabaseNotAvailable)
+async def database_not_available_handler(request: Request, exc: DatabaseNotAvailable):
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "success": False,
+            "message": "Database is not connected. Start MongoDB, set MONGODB_URL in backend/.env (or repo-root .env), then restart the API.",
+            "detail": "database_unavailable",
+            "hint": "Local example: MONGODB_URL=mongodb://127.0.0.1:27017 — or use your MongoDB Atlas connection string.",
+        },
+    )
+
+
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     _log.exception("Unhandled exception: %r", exc)
@@ -271,12 +392,16 @@ def custom_openapi():
         return app.openapi_schema
     from fastapi.openapi.utils import get_openapi
 
-    openapi_schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        description=app.description,
-        routes=app.routes,
-    )
+    kw: dict = {
+        "title": app.title,
+        "version": app.version,
+        "description": app.description,
+        "routes": app.routes,
+    }
+    if getattr(app, "openapi_tags", None):
+        kw["tags"] = app.openapi_tags
+
+    openapi_schema = get_openapi(**kw)
     schemes = openapi_schema.get("components", {}).get("securitySchemes") or {}
     for scheme in schemes.values():
         if scheme.get("type") == "http" and scheme.get("scheme") == "bearer":
@@ -293,17 +418,69 @@ app.openapi = custom_openapi
 
 
 # ──────────────────────────────────────────────
+# SWAGGER UI (custom HTML so tag sidebar follows _OPENAPI_TAG_ORDER)
+# ──────────────────────────────────────────────
+
+
+def _swagger_ui_response(request: Request, page_title: str):
+    root_path = request.scope.get("root_path", "").rstrip("/")
+    openapi_url = root_path + (app.openapi_url or "/openapi.json")
+    oauth2_redirect_url = app.swagger_ui_oauth2_redirect_url
+    if oauth2_redirect_url:
+        oauth2_redirect_url = root_path + oauth2_redirect_url
+    return get_swagger_ui_html_with_tag_order(
+        openapi_url=openapi_url,
+        title=page_title,
+        tag_order=_OPENAPI_TAG_ORDER,
+        oauth2_redirect_url=oauth2_redirect_url,
+        init_oauth=app.swagger_ui_init_oauth,
+        swagger_ui_parameters=app.swagger_ui_parameters,
+    )
+
+
+@app.get("/docs", include_in_schema=False)
+async def swagger_docs(request: Request):
+    """Interactive OpenAPI docs; tag order matches the recommended product flow."""
+    return _swagger_ui_response(request, f"{app.title} - Swagger UI")
+
+
+@app.get(app.swagger_ui_oauth2_redirect_url, include_in_schema=False)
+async def swagger_oauth2_redirect():
+    return get_swagger_ui_oauth2_redirect_html()
+
+
+@app.get("/swagger", include_in_schema=False)
+async def swagger_ui_fresh(request: Request):
+    """Same spec and tag order as `/docs`; alternate URL if `/docs` is cached."""
+    return _swagger_ui_response(request, f"{app.title} — Swagger UI")
+
+
+# ──────────────────────────────────────────────
 # ROOT
 # ──────────────────────────────────────────────
 
 @app.get("/", tags=["Health"], summary="API health check")
-async def root():
+async def root(request: Request):
+    """Includes absolute URLs so you can confirm you are on this server (port + host)."""
+    base = str(request.base_url).rstrip("/")
     return {
         "service": "GlimmoraTeam AI SOW Generator API",
-        "version": "1.0.0",
+        "version": app.version,
         "status": "running",
-        "docs": "/docs",
-        "redoc": "/redoc",
+        "you_are_here": base,
+        "docs": f"{base}/docs",
+        "swagger": f"{base}/swagger",
+        "openapi_json": f"{base}/openapi.json",
+        "redoc": f"{base}/redoc",
+        "flow_order_note": (
+            "Intended order: **SOW Wizard** (/api/v1/wizards) → **AI Draft Review** (/api/v1/sows) → "
+            "optional **Manual SOW upload** (/api/v1/sow/). "
+            "Swagger lists tags in this order; the UI step bar is implemented in the frontend app."
+        ),
+        "manual_sow_note": (
+            "Manual upload: **/api/v1/sow/** (singular). Wizard + AI review: **/api/v1/sows/** (plural)."
+        ),
+        "manual_sow_example": f"{base}/api/v1/sow/upload",
     }
 
 
@@ -326,7 +503,7 @@ async def health():
     return {
         "status": "ok" if db_status == "connected" else "degraded",
         "database": db_status,
-        "version": "1.0.0",
+        "version": app.version,
     }
 
 

@@ -2,7 +2,11 @@
 Test Suite — AI SOW Generator API
 Tests all wizard steps, validation rules, confidence scoring, and SOW generation.
 Run with: pytest tests/ -v
+
+Requires MongoDB reachable at 127.0.0.1:27017 (or change skip logic if using Atlas only).
 """
+
+import socket
 
 import pytest
 import pytest_asyncio
@@ -10,6 +14,44 @@ from httpx import AsyncClient, ASGITransport
 from app.main import app
 
 BASE = "/api/v1"
+
+
+def _mongo_listening(host: str = "127.0.0.1", port: int = 27017, timeout: float = 0.4) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    try:
+        sock.connect((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+pytestmark = pytest.mark.skipif(
+    not _mongo_listening(),
+    reason="MongoDB not on 127.0.0.1:27017 — start local Mongo/Docker or point tests at your cluster",
+)
+
+
+def _enterprise_register_body(email: str, password: str) -> dict:
+    """POST /auth/register/enterprise payload (legacy /auth/register was removed)."""
+    return {
+        "email": email,
+        "password": password,
+        "firstName": "Test",
+        "lastName": "User",
+        "orgName": "Test Corp",
+        "orgType": "company",
+        "industry": "technology",
+        "companySize": "1-50",
+        "adminTitle": "Engineer",
+        "acceptTos": True,
+        "acceptPp": True,
+        "acceptEsa": True,
+        "acceptAhp": True,
+    }
+
 
 # ──────────────────────────────────────────────
 # FIXTURES
@@ -29,12 +71,11 @@ async def auth_headers(client):
     import uuid
     email = f"test_{uuid.uuid4().hex[:8]}@test.com"
 
-    await client.post(f"{BASE}/auth/register", json={
-        "email": email,
-        "password": "testpassword123",
-        "full_name": "Test User",
-        "organisation": "Test Corp",
-    })
+    reg = await client.post(
+        f"{BASE}/auth/register/enterprise",
+        json=_enterprise_register_body(email, "testpassword123"),
+    )
+    assert reg.status_code == 201, reg.text
     res = await client.post(f"{BASE}/auth/login", data={
         "username": email,
         "password": "testpassword123"
@@ -335,12 +376,15 @@ STEP_8_PAYLOAD = {
 async def test_register_and_login(client):
     import uuid
     email = f"newuser_{uuid.uuid4().hex[:6]}@test.com"
-    res = await client.post(f"{BASE}/auth/register", json={
-        "email": email, "password": "securepass123",
-        "full_name": "Jane Doe", "organisation": "ACME Corp"
-    })
-    assert res.status_code == 201
-    assert res.json()["success"] is True
+    res = await client.post(
+        f"{BASE}/auth/register/enterprise",
+        json=_enterprise_register_body(email, "securepass123"),
+    )
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert "user" in body
+    assert body["user"].get("email", "").lower() == email.lower()
+    assert "enterprise_profile_id" in body
 
     res2 = await client.post(f"{BASE}/auth/login", data={"username": email, "password": "securepass123"})
     assert res2.status_code == 200
@@ -352,9 +396,10 @@ async def test_duplicate_email_rejected(client, auth_headers):
     # Get the current user's email from /me
     me = await client.get(f"{BASE}/auth/me", headers=auth_headers)
     email = me.json()["data"]["email"]
-    res = await client.post(f"{BASE}/auth/register", json={
-        "email": email, "password": "pass", "full_name": "Dup", "organisation": "X"
-    })
+    res = await client.post(
+        f"{BASE}/auth/register/enterprise",
+        json=_enterprise_register_body(email, "anotherPass9"),
+    )
     assert res.status_code == 409
 
 

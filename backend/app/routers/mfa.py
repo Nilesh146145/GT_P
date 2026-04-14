@@ -8,6 +8,8 @@ MFA Router — RFC 6238 TOTP (Google Authenticator / Microsoft Authenticator).
   POST /auth/mfa/disable
   GET  /auth/mfa/status
 """
+from __future__ import annotations
+
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 

@@ -1,0 +1,100 @@
+{
+  "base_url": "http://127.0.0.1:8001/api/v1",
+  "notes": [
+    "Send Authorization: Bearer <JWT> on all requests after login.",
+    "Upload is multipart/form-data: fields projectTitle, clientOrganisation, optional linkedSowId, plus file.",
+    "After upload, poll GET /sow/{sow_id}/upload-status until processing_state is complete (for generation tests).",
+    "For generation preview test: POST /sow/{sow_id}/extraction-items/accept-all then PATCH each section, mark-complete each, PATCH approval-authorities, POST /sow/{sow_id}/generate.",
+    "GET /sow/{sow_id}/commercial-details returns aiGeneratedText once Section A+B are valid and marked complete (aiTechStackReady), OpenAI or mock, and ai_generated_text empty/incomplete."
+  ],
+  "upload_form_fields": {
+    "projectTitle": "Manual SOW Test Project Alpha",
+    "clientOrganisation": "ACME Corporation"
+  },
+  "approval_authorities_patch": {
+    "business_owner_approver": "business.owner@example.com",
+    "final_approver": "final.approver@example.com"
+  },
+  "generate_body": {
+    "include_extracted_sections": true
+  },
+  "commercial_sections": {
+    "businessContext": {
+      "projectVision": "Deliver a production-grade customer portal and workflow platform that improves team throughput, auditability, and reliability across regions. Stakeholders require measurable cycle-time reduction.",
+      "businessCriticality": "business_important",
+      "currentState": "Workflows are fragmented across spreadsheets, email, and legacy tools.",
+      "desiredFutureState": "Single integrated system with automation, role-based access, and clear ownership.",
+      "definitionOfSuccess": "Executive sign-off on go-live criteria and KPI dashboard showing adoption and SLA compliance."
+    },
+    "deliveryScope": {
+      "platformType": "WEB_APPLICATION",
+      "developmentScope": ["Backend", "API", "Web UI", "Integration"],
+      "uiuxDesignScope": "in_scope",
+      "deploymentScope": "cloud",
+      "goLiveScope": "go_live_hypercare",
+      "dataMigrationScope": "in_scope"
+    },
+    "techIntegrations": {
+      "technologyStack": "Python FastAPI backend, React SPA, PostgreSQL, Redis cache, Docker, AWS ECS, OAuth2 SSO with Okta."
+    },
+    "timelineTeam": {
+      "startDate": "2026-01-15",
+      "targetEndDate": "2026-12-15",
+      "uatSignOffAuthority": "Jane Doe, VP Operations",
+      "uatSignOffConfirmed": true
+    },
+    "budgetRisk": {
+      "budgetMinimum": 150000,
+      "budgetMaximum": 280000,
+      "pricingModel": "hybrid"
+    },
+    "governance": {
+      "nonDiscriminationConfirmed": true,
+      "dataSensitivityLevel": "confidential",
+      "personalDataInvolved": "yes"
+    },
+    "commercialLegal": {
+      "ipOwnership": "client_owns_all",
+      "sourceCodeOwnership": "client_hosts",
+      "changeRequestProcess": "formal_cr",
+      "thirdPartyCosts": "split"
+    }
+  },
+  "mark_complete_body_template": {
+    "section": "businessContext"
+  },
+  "allowed_values_reference": {
+    "platformType": [
+      "WEB_APPLICATION",
+      "MOBILE_IOS",
+      "MOBILE_ANDROID",
+      "MOBILE_HYBRID",
+      "DESKTOP",
+      "API_BACKEND_ONLY",
+      "DATA_PLATFORM",
+      "FULL_STACK",
+      "OTHER"
+    ],
+    "businessCriticality": ["mission_critical", "business_important", "standard", "low"],
+    "uiuxDesignScope": ["not_in_scope", "in_scope", "client_provides"],
+    "deploymentScope": ["not_in_scope", "cloud", "on_premise", "both"],
+    "goLiveScope": ["not_in_scope", "go_live", "go_live_hypercare"],
+    "dataMigrationScope": ["not_in_scope", "in_scope"],
+    "pricingModel": ["fixed_price", "time_and_materials", "outcome_based", "hybrid"],
+    "dataSensitivityLevel": ["public", "internal", "confidential", "restricted"],
+    "personalDataInvolved": ["yes", "no"],
+    "ipOwnership": ["client_owns_all", "glimmora_retains_framework", "joint", "custom"],
+    "sourceCodeOwnership": ["client_hosts", "glimmora_hosts_transfer", "client_provides_day_one"],
+    "changeRequestProcess": ["formal_cr", "threshold_cr", "time_and_materials"],
+    "thirdPartyCosts": ["client_pays", "glimmora_absorbs", "split"]
+  },
+  "commercial_section_keys_for_mark_complete": [
+    "businessContext",
+    "deliveryScope",
+    "techIntegrations",
+    "timelineTeam",
+    "budgetRisk",
+    "governance",
+    "commercialLegal"
+  ]
+}

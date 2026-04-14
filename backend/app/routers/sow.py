@@ -1,6 +1,8 @@
 """
 SOW Review Router — AI Draft Review endpoints (§7.4)
 """
+from __future__ import annotations
+
 
 from fastapi import APIRouter, Depends, Path, Body
 from typing import Optional

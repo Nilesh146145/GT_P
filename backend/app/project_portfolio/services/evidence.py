@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 from collections import defaultdict
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
+
+UTC = timezone.utc  # Python 3.9 (datetime.UTC is 3.11+)
 
 from app.project_portfolio.schemas.evidence import (
     EvidencePackGroup,

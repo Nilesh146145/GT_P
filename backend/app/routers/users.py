@@ -3,6 +3,8 @@ Users Router — enterprise user management and user picker support.
 The user picker is used in Step 9 for designating Business Owner Approver,
 Final Approver, Legal Reviewer, and Security Reviewer.
 """
+from __future__ import annotations
+
 
 from fastapi import APIRouter, Depends, Query, Path
 from bson import ObjectId

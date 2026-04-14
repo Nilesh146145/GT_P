@@ -1,6 +1,8 @@
 """
 Auth schemas — derived from app/schemas/auth.py in the reference app.
 """
+from __future__ import annotations
+
 
 from datetime import datetime
 from typing import List, Literal, Optional, Union

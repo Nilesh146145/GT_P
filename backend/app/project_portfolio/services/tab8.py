@@ -1,8 +1,12 @@
+from __future__ import annotations
+
 import itertools
 import random
 import string
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc  # Python 3.9 (datetime.UTC is 3.11+)
 
 from app.project_portfolio.schemas.tab8 import (
     CommercialSummaryResponse,
@@ -15,7 +19,7 @@ from app.project_portfolio.schemas.tab8 import (
 )
 from app.project_portfolio.services.projects import project_exists
 
-_UTC = UTC
+_UTC = UTC  # alias for readability in this module
 _OTP_TTL = timedelta(minutes=15)
 _ALLOWED_PURPOSES = frozenset({"m2_payment", "uat_signoff"})
 

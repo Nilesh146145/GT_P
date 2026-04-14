@@ -7,6 +7,8 @@ Collections:
   enterprises — org-level document
   users       — admin user linked to enterprise
 """
+from __future__ import annotations
+
 
 
 import logging

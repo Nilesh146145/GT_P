@@ -8,6 +8,8 @@ OAuth — Google and Microsoft sign-in with the same MFA branching as password l
 
 Register the exact callback URLs in Google Cloud Console and Azure App Registration.
 """
+from __future__ import annotations
+
 
 from typing import Optional, Union
 

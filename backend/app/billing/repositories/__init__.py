@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from app.billing.repositories import invoice_repository, payment_repository, reference_repository, refund_repository
 
 __all__ = [
