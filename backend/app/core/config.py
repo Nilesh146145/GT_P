@@ -1,17 +1,32 @@
+from __future__ import annotations
+
+import os
 from pathlib import Path
 from typing import Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Resolve .env next to project root (not uvicorn CWD) so OAuth vars load reliably.
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_DOTENV_PATH = _PROJECT_ROOT / ".env"
+# Resolve .env without relying on uvicorn CWD. Try monorepo root first, then backend/
+# (later files override — backend/.env wins if both exist).
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = _BACKEND_ROOT.parent
+
+
+def _env_file_paths() -> tuple[str, ...]:
+    paths: list[str] = []
+    repo_env = _REPO_ROOT / ".env"
+    backend_env = _BACKEND_ROOT / ".env"
+    if repo_env.is_file():
+        paths.append(str(repo_env))
+    if backend_env.is_file():
+        paths.append(str(backend_env))
+    return tuple(paths) if paths else (".env",)
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=str(_DOTENV_PATH) if _DOTENV_PATH.is_file() else ".env",
+        env_file=_env_file_paths(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -77,6 +92,17 @@ class Settings(BaseSettings):
     # Contributor module — NEVER enable in production (bypasses JWT for /api/contributor/*)
     AUTH_ALLOW_HEADER_FALLBACK: bool = False
 
+    # ── OpenAI (Manual SOW — Tech & Integrations “Generate with AI”) ───────────
+    OPENAI_API_KEY: Optional[str] = None
+    MANUAL_SOW_OPENAI_MODEL: str = "gpt-4o-mini"
+    # Dev/demo: skip OpenAI and return a deterministic tech-stack payload from commercial_details.
+    MANUAL_SOW_USE_MOCK_AI_TECH_STACK: bool = False
+    # When True (default), insufficient OpenAI quota → persist mock tech stack on same GET so the client is not stuck on null.
+    # Set MANUAL_SOW_AI_FALLBACK_ON_QUOTA=false in .env if you must fail closed without mock data.
+    MANUAL_SOW_AI_FALLBACK_ON_QUOTA: bool = True
+    # When True, OpenAI tech-stack generation runs in a background task; poll GET commercial-details until aiGeneratedText appears.
+    MANUAL_SOW_AI_TECH_STACK_ASYNC: bool = False
+
     @staticmethod
     def _blank_to_none(v: Optional[str]) -> Optional[str]:
         if v is None:
@@ -94,6 +120,7 @@ class Settings(BaseSettings):
         "TOTP_ENCRYPTION_KEY",
         "NEXTAUTH_SECRET",
         "DECOMPOSITION_REVISION_WEBHOOK_SECRET",
+        "OPENAI_API_KEY",
         mode="before",
     )
     @classmethod
@@ -111,5 +138,34 @@ class Settings(BaseSettings):
     def microsoft_oauth_configured(self) -> bool:
         return bool(self._blank_to_none(self.MICROSOFT_CLIENT_ID) and self._blank_to_none(self.MICROSOFT_CLIENT_SECRET))
 
+    def openai_configured(self) -> bool:
+        return bool(self._blank_to_none(self.OPENAI_API_KEY))
+
 
 settings = Settings()
+
+
+def manual_sow_use_mock_ai_tech_stack() -> bool:
+    """True to skip OpenAI entirely. Reads Settings, with env fallback if the field is missing (mixed deploys)."""
+    if hasattr(settings, "MANUAL_SOW_USE_MOCK_AI_TECH_STACK"):
+        return bool(getattr(settings, "MANUAL_SOW_USE_MOCK_AI_TECH_STACK"))
+    return os.getenv("MANUAL_SOW_USE_MOCK_AI_TECH_STACK", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def manual_sow_ai_tech_stack_async() -> bool:
+    env = os.getenv("MANUAL_SOW_AI_TECH_STACK_ASYNC")
+    if env is not None and env.strip() != "":
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    if hasattr(settings, "MANUAL_SOW_AI_TECH_STACK_ASYNC"):
+        return bool(getattr(settings, "MANUAL_SOW_AI_TECH_STACK_ASYNC"))
+    return False
+
+
+def manual_sow_ai_fallback_on_quota() -> bool:
+    """When OpenAI fails with quota exhaustion, persist mock payload. Env overrides if set."""
+    env = os.getenv("MANUAL_SOW_AI_FALLBACK_ON_QUOTA")
+    if env is not None and env.strip() != "":
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    if hasattr(settings, "MANUAL_SOW_AI_FALLBACK_ON_QUOTA"):
+        return bool(getattr(settings, "MANUAL_SOW_AI_FALLBACK_ON_QUOTA"))
+    return True

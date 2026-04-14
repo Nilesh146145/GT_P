@@ -14,6 +14,8 @@ Auth Router
   DELETE /auth/sessions/{session_id}
   POST   /auth/password/forgot
 """
+from __future__ import annotations
+
 
 
 from typing import Union

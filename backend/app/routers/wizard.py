@@ -2,6 +2,8 @@
 Wizard Router — all 10-step wizard endpoints.
 Each step has its own typed endpoint with full Pydantic validation.
 """
+from __future__ import annotations
+
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Body
 from typing import Any

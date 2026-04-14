@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends
 
 from app.routers.decomposition._dependencies import enterprise_profile_id, require_enterprise_user

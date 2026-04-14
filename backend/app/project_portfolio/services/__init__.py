@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from app.project_portfolio.services import (
     escalations,
     evidence,

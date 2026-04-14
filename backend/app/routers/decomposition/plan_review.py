@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Body, Depends, Path
 
 from app.models.decomposition import (

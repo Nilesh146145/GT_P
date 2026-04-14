@@ -7,6 +7,8 @@ Collections:
   users    — user accounts
   sessions — active refresh token sessions (TTL via expires_at index)
 """
+from __future__ import annotations
+
 
 
 import hashlib

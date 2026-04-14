@@ -7,6 +7,8 @@ Handles password reset initiation.
   stores it in the password_resets collection, and logs it (dry-run).
   In production, wire this to your email delivery service.
 """
+from __future__ import annotations
+
 
 
 import logging

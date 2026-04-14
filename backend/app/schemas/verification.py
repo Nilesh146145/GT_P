@@ -1,6 +1,8 @@
 """
 Verification schemas — derived from app/schemas/verification.py.
 """
+from __future__ import annotations
+
 
 from pydantic import BaseModel
 
