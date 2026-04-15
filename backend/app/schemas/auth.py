@@ -22,9 +22,6 @@ def _validate_password(v: str) -> str:
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    role: str = Field(
-        description="Required role for strict role-bound login (enterprise, contributor, reviewer).",
-    )
     workspace: Optional[str] = Field(
         default=None,
         description="Optional. Omit or use null — not required for login or MFA testing.",
