@@ -113,6 +113,7 @@ async def me(current_user: dict = Depends(get_current_user_for_me)) -> CurrentUs
         mfaEnabled=bool(u.get("mfa_enabled", False)),
         mfaEnrollmentRequired=mfa_service.mfa_enrollment_required(u),
         authPending=auth_pending,
+        profileImageUrl=u.get("profile_image_data_url"),
         enterpriseProfile=enterprise_profile,
     )
 

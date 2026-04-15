@@ -4,12 +4,14 @@ The user picker is used in Step 9 for designating Business Owner Approver,
 Final Approver, Legal Reviewer, and Security Reviewer.
 """
 
-from fastapi import APIRouter, Depends, Query, Path
+from fastapi import APIRouter, Depends, File, Path, Query, UploadFile
 from bson import ObjectId
 
 from app.core.security import get_current_user
 from app.core.database import get_users_collection
 from app.schemas.common import BaseResponse
+from app.schemas.profile import UpdateMyProfileRequest
+from app.services import profile_service
 
 router = APIRouter(prefix="/users", tags=["Users & Enterprise"])
 
@@ -71,3 +73,36 @@ async def get_user(
 
     user["id"] = str(user.pop("_id"))
     return BaseResponse(data=user)
+
+
+@router.get("/me/profile", response_model=BaseResponse, summary="Get current user profile")
+async def get_my_profile(current_user: dict = Depends(get_current_user)):
+    """Returns role-aware profile details for the current authenticated user."""
+    return BaseResponse(data=await profile_service.get_my_profile(current_user))
+
+
+@router.put("/me/profile", response_model=BaseResponse, summary="Update current user profile")
+async def update_my_profile(
+    payload: UpdateMyProfileRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Updates current user's editable profile fields without changing auth/session flows."""
+    data = await profile_service.update_my_profile(current_user, payload)
+    return BaseResponse(message="Profile updated successfully.", data=data)
+
+
+@router.post("/me/profile-picture", response_model=BaseResponse, summary="Upload profile picture")
+async def upload_profile_picture(
+    file: UploadFile = File(..., description="JPEG/PNG/WEBP image up to 2 MB"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Stores user profile picture as a data URL for immediate frontend rendering."""
+    data = await profile_service.save_profile_picture(current_user, file)
+    return BaseResponse(message="Profile picture updated successfully.", data=data)
+
+
+@router.delete("/me/profile-picture", response_model=BaseResponse, summary="Remove profile picture")
+async def delete_profile_picture(current_user: dict = Depends(get_current_user)):
+    """Clears the current user's profile picture."""
+    data = await profile_service.remove_profile_picture(current_user)
+    return BaseResponse(message="Profile picture removed successfully.", data=data)
