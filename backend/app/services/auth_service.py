@@ -38,6 +38,11 @@ from app.schemas.auth import (
     TokenPair,
     ValidateResponse,
 )
+from app.services.email_role_guard import (
+    normalize_role,
+    require_supported_role,
+    role_conflict_login_message,
+)
 from app.services.reviewer import reviewer_auth_service
 
 logger = logging.getLogger(__name__)
@@ -61,6 +66,25 @@ def _build_auth_user(user: dict) -> AuthUser:
         emailVerified=user.get("email_verified", False),
         **reviewer_auth_service.auth_user_flags(user),
     )
+
+
+def _normalized_user_role(user: dict) -> str:
+    return normalize_role(user.get("role"), default="enterprise") or "enterprise"
+
+
+def _enforce_requested_login_role(user: dict, requested_role_raw: str | None) -> None:
+    if requested_role_raw is None:
+        return
+    requested_role = require_supported_role(requested_role_raw, field_name="login role")
+    actual_role = _normalized_user_role(user)
+    if requested_role != actual_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "EMAIL_ROLE_CONFLICT",
+                "message": role_conflict_login_message(requested_role),
+            },
+        )
 
 
 # ── Full session (post-MFA or no MFA) ─────────────────────────────────────────
@@ -125,6 +149,7 @@ async def login_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "NO_ACCOUNT", "message": "We couldn't find an account associated with this email."},
         )
+    _enforce_requested_login_role(user, payload.role)
 
     if not verify_password(payload.password, user["hashed_password"]):
         raise HTTPException(
@@ -221,6 +246,7 @@ async def validate_credentials(payload: LoginRequest) -> ValidateResponse:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "NO_ACCOUNT", "message": "We couldn't find an account associated with this email."},
         )
+    _enforce_requested_login_role(user, payload.role)
 
     if not verify_password(payload.password, user["hashed_password"]):
         raise HTTPException(

@@ -19,6 +19,11 @@ from jose import JWTError, jwt
 from app.core.config import settings
 from app.core.database import get_users_collection
 from app.schemas.auth import LoginResponse, MfaPendingLoginResponse
+from app.services.email_role_guard import (
+    normalize_role,
+    require_supported_role,
+    role_conflict_registered_message,
+)
 from app.services import auth_service
 
 logger = logging.getLogger(__name__)
@@ -228,12 +233,23 @@ async def find_or_create_oauth_user(
     first_name: str,
     last_name: str,
     provider: OAuthProvider,
+    expected_role: str = "contributor",
 ) -> dict:
     col = get_users_collection()
     user = await col.find_one({"email": email})
     now = datetime.now(timezone.utc)
+    oauth_role = require_supported_role(expected_role, field_name="oauth role")
 
     if user:
+        existing_role = normalize_role(user.get("role"), default="enterprise") or "enterprise"
+        if existing_role != oauth_role:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "EMAIL_ROLE_CONFLICT",
+                    "message": role_conflict_registered_message(existing_role),
+                },
+            )
         await col.update_one(
             {"_id": user["_id"]},
             {"$set": {"updated_at": now, "last_oauth_provider": provider}},
@@ -247,7 +263,7 @@ async def find_or_create_oauth_user(
             "first_name": first_name or email.split("@")[0],
             "last_name": last_name or "",
             "full_name": full_name,
-            "role": "contributor",
+            "role": oauth_role,
             "provider": provider,
             "mfa_enabled": False,
             "requires_password_change": False,
@@ -273,6 +289,7 @@ async def complete_google_login(
     redirect_uri: str,
     ip_address: Optional[str],
     user_agent: Optional[str],
+    expected_role: str = "contributor",
 ) -> Union[LoginResponse, MfaPendingLoginResponse]:
     cv = decode_oauth_state(state, "google")
     tokens = await _exchange_google_code(code, redirect_uri, code_verifier=cv)
@@ -280,7 +297,7 @@ async def complete_google_login(
     if not access:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No access token from Google.")
     email, given, family = await _google_userinfo(access)
-    user = await find_or_create_oauth_user(email, given, family, "google")
+    user = await find_or_create_oauth_user(email, given, family, "google", expected_role=expected_role)
     return await auth_service.oauth_primary_auth_result(
         user,
         ip_address,
@@ -295,6 +312,7 @@ async def complete_microsoft_login(
     redirect_uri: str,
     ip_address: Optional[str],
     user_agent: Optional[str],
+    expected_role: str = "contributor",
 ) -> Union[LoginResponse, MfaPendingLoginResponse]:
     cv = decode_oauth_state(state, "microsoft")
     tokens = await _exchange_microsoft_code(code, redirect_uri, code_verifier=cv)
@@ -302,7 +320,7 @@ async def complete_microsoft_login(
     if not access:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No access token from Microsoft.")
     email, given, family = await _microsoft_userinfo(access)
-    user = await find_or_create_oauth_user(email, given, family, "microsoft")
+    user = await find_or_create_oauth_user(email, given, family, "microsoft", expected_role=expected_role)
     return await auth_service.oauth_primary_auth_result(
         user,
         ip_address,
