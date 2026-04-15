@@ -8,7 +8,6 @@ from __future__ import annotations
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_oauth2_redirect_html
-from starlette.requests import Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
@@ -16,6 +15,7 @@ import logging
 
 from app.core.config import settings
 from app.core.database import DatabaseNotAvailable, close_db, connect_db
+from app.contributor import router as contributor_router
 from app.project_portfolio import router as project_portfolio_router
 from app.routers import auth, mfa, oauth, reviewer, wizard, sow, approvals, users, manual_sow_router
 from app.routers.decomposition import decomposition_router
@@ -61,6 +61,13 @@ def _check_email_validator_for_openapi() -> None:
 async def lifespan(app: FastAPI):
     _check_email_validator_for_openapi()
     await connect_db()
+    try:
+        from app.contributor import demo_bootstrap
+
+        demo_bootstrap.install_temp_api_db_layout()
+        demo_bootstrap.apply_all_temp_demo_seeds()
+    except Exception:
+        _log.exception("Contributor demo bootstrap failed; continuing startup")
     try:
         await create_indexes()
     except Exception:
@@ -335,11 +342,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(DatabaseNotAvailable)
 async def database_not_available_handler(request: Request, exc: DatabaseNotAvailable):
+    msg = (str(exc) or "").strip() or (
+        "Database is not connected. Start MongoDB, set MONGODB_URL in backend/.env "
+        "(or repo-root .env), then restart the API."
+    )
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={
             "success": False,
-            "message": "Database is not connected. Start MongoDB, set MONGODB_URL in backend/.env (or repo-root .env), then restart the API.",
+            "code": "DATABASE_UNAVAILABLE",
+            "message": msg,
             "detail": "database_unavailable",
             "hint": "Local example: MONGODB_URL=mongodb://127.0.0.1:27017 — or use your MongoDB Atlas connection string.",
         },
@@ -369,6 +381,7 @@ API_PREFIX = "/api/v1"
 app.include_router(auth.router, prefix=API_PREFIX)
 app.include_router(oauth.router, prefix=API_PREFIX)
 app.include_router(mfa.router, prefix=API_PREFIX)
+app.include_router(contributor_router)
 app.include_router(wizard.router, prefix=API_PREFIX)
 app.include_router(sow.router, prefix=API_PREFIX)
 app.include_router(approvals.router, prefix=API_PREFIX)
@@ -402,6 +415,9 @@ def custom_openapi():
         kw["tags"] = app.openapi_tags
 
     openapi_schema = get_openapi(**kw)
+    from app.contributor.openapi import patch_contributor_paths_security
+
+    patch_contributor_paths_security(openapi_schema)
     schemes = openapi_schema.get("components", {}).get("securitySchemes") or {}
     for scheme in schemes.values():
         if scheme.get("type") == "http" and scheme.get("scheme") == "bearer":

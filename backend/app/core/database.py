@@ -72,7 +72,9 @@ def is_db_connected() -> bool:
 def get_database():
     if client is None:
         raise DatabaseNotAvailable(
-            "Database not initialized — set MONGODB_URL and ensure MongoDB is reachable, then restart the server."
+            "MongoDB is not connected. Start MongoDB (e.g. "
+            "`docker run -d -p 27017:27017 mongo:7`) or set MONGODB_URL in "
+            "backend/.env and restart the API."
         )
     return client[settings.DATABASE_NAME]
 
