@@ -3,13 +3,47 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-from app.schemas.manual_sow.enums import CommercialSectionKey
+from app.schemas.manual_sow.enums import CommercialSectionKey, CommercialSectionStatus
+from app.schemas.manual_sow.manual_sow_platform_type import ManualSowPlatformType, normalize_manual_sow_platform_type
 
 
 def _non_empty(v: Any) -> bool:
     return v is not None and str(v).strip() != ""
+
+
+# Belongs only under ``deliveryScope``. If a client PATCHes them into ``businessContext``, remove them
+# so the API does not return duplicate platform / scope data in two places.
+_DELIVERY_SCOPE_ONLY_KEYS = frozenset(
+    {
+        "platformType",
+        "platform_type",
+        "developmentScope",
+        "development_scope",
+        "uiuxDesignScope",
+        "uiux_design_scope",
+        "deploymentScope",
+        "deployment_scope",
+        "goLiveScope",
+        "go_live_scope",
+        "dataMigrationScope",
+        "data_migration_scope",
+    }
+)
+
+
+def strip_delivery_scope_fields_from_business_context(
+    bc: Optional[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], bool]:
+    """
+    Drop delivery-scope fields wrongly stored under ``businessContext``.
+
+    Returns ``(cleaned_business_context, did_strip)``.
+    """
+    src = dict(bc or {})
+    out = {k: v for k, v in src.items() if k not in _DELIVERY_SCOPE_ONLY_KEYS}
+    return out, len(out) != len(src)
 
 
 def validate_section(
@@ -39,6 +73,14 @@ def validate_section(
         dev = d.get("developmentScope") or d.get("development_scope") or []
         if not isinstance(dev, list) or len(dev) < 1:
             errors["developmentScope"] = "At least one development scope item required"
+        pt = d.get("platformType") or d.get("platform_type")
+        allowed_pt = {e.value for e in ManualSowPlatformType}
+        pt_norm = normalize_manual_sow_platform_type(pt)
+        pt_check = pt_norm if pt_norm else pt
+        if not _non_empty(pt_check):
+            errors["platformType"] = "Must be set (choose a platform type)"
+        elif str(pt_check).strip() not in allowed_pt:
+            errors["platformType"] = f"Must be one of {sorted(allowed_pt)}"
         for fld, allowed in [
             ("uiuxDesignScope", ("not_in_scope", "in_scope", "client_provides")),
             ("deploymentScope", ("not_in_scope", "cloud", "on_premise", "both")),
@@ -143,3 +185,89 @@ def all_sections_complete(section_status: Dict[str, str]) -> bool:
         if section_status.get(k) != "complete":
             return False
     return True
+
+
+def promote_prerequisite_sections_when_valid(
+    section_status: Optional[Dict[str, Any]],
+    commercial_details: Optional[Dict[str, Any]],
+) -> Dict[str, str]:
+    """
+    After PATCH / extraction prefill: mark businessContext and deliveryScope as complete when
+    validate_section passes so Tech & Integrations AI can run without a separate mark-complete call.
+    """
+    cd = commercial_details or {}
+    out = dict(section_status or {})
+    for key in (CommercialSectionKey.businessContext, CommercialSectionKey.deliveryScope):
+        data = cd.get(key.value) or {}
+        ok, _ = validate_section(key, data)
+        if ok:
+            out[key.value] = CommercialSectionStatus.complete.value
+    return out
+
+
+def downgrade_prerequisite_sections_if_invalid(
+    section_status: Optional[Dict[str, Any]],
+    commercial_details: Optional[Dict[str, Any]],
+) -> Dict[str, str]:
+    """
+    On GET commercial-details: if a section was complete but data no longer validates, drop to in_progress.
+    """
+    cd = commercial_details or {}
+    out = dict(section_status or {})
+    for key in (CommercialSectionKey.businessContext, CommercialSectionKey.deliveryScope):
+        data = cd.get(key.value) or {}
+        ok, _ = validate_section(key, data)
+        prev = out.get(key.value)
+        if not ok and prev == CommercialSectionStatus.complete.value:
+            out[key.value] = CommercialSectionStatus.in_progress.value
+    return out
+
+
+def ai_tech_stack_generation_ready(
+    section_status: Optional[Dict[str, Any]],
+    commercial_details: Optional[Dict[str, Any]],
+) -> Tuple[bool, Dict[str, str]]:
+    """
+    Tech-stack AI runs only when Section A and B data validate AND both are marked complete
+    (completion is set automatically when validation passes on PATCH / prefill / extraction).
+    """
+    cd = commercial_details or {}
+    ok_pre, _ = tech_integrations_prerequisites(cd)
+    if not ok_pre:
+        return False, {}
+    ss = section_status or {}
+    hints: Dict[str, str] = {}
+    ready = True
+    bc = ss.get(CommercialSectionKey.businessContext.value)
+    ds = ss.get(CommercialSectionKey.deliveryScope.value)
+    if bc != CommercialSectionStatus.complete.value:
+        ready = False
+        hints["businessContext"] = (
+            "Finish Business Context (all required fields); it must show as complete before AI fills Tech & Integrations."
+        )
+    if ds != CommercialSectionStatus.complete.value:
+        ready = False
+        hints["deliveryScope"] = (
+            "Finish Delivery Scope, including platform type and scope enums; it must show as complete before AI runs."
+        )
+    return ready, hints
+
+
+def tech_integrations_prerequisites(
+    commercial_details: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, Dict[str, Dict[str, str]]]:
+    """
+    Section C (techIntegrations) should be offered only after Section A (businessContext)
+    and Section B (deliveryScope) satisfy required-field validation.
+    """
+    cd = commercial_details or {}
+    bc = cd.get("businessContext") or {}
+    ds = cd.get("deliveryScope") or {}
+    ok_bc, err_bc = validate_section(CommercialSectionKey.businessContext, bc)
+    ok_ds, err_ds = validate_section(CommercialSectionKey.deliveryScope, ds)
+    errors: Dict[str, Dict[str, str]] = {}
+    if not ok_bc:
+        errors["businessContext"] = err_bc
+    if not ok_ds:
+        errors["deliveryScope"] = err_ds
+    return (ok_bc and ok_ds, errors)

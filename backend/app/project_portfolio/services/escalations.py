@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 import itertools
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+
+UTC = timezone.utc  # Python 3.9 (datetime.UTC is 3.11+)
 
 from app.project_portfolio.schemas.escalation import EscalationCreate, EscalationRecord
 from app.project_portfolio.services.projects import project_exists

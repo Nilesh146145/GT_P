@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 from app.schemas.manual_sow.enums import ContextDetectionStatus, ExtractionCategory
+from app.services.manual_sow.platform_detection import infer_platform_type_from_text
 
 
 @dataclass
@@ -130,6 +131,7 @@ def extract_bytes(filename: str, content: bytes) -> ExtractionResult:
             "painPoints": _ctx(pain_snip),
             "userContext": _ctx(user_snip),
         },
+        "platformType": infer_platform_type_from_text(text),
         "sectionsFound": len(items),
         "aiConfidence": min(95, 60 + len(items) * 2),
         "gapScore": max(40, 85 - len(items)),

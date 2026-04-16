@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import importlib
 import os
 import socket
@@ -138,7 +140,7 @@ async def _create_active_reviewer(client: AsyncClient, admin_headers: dict[str, 
 
     login_res = await client.post(
         f"{BASE}/auth/login",
-        json={"email": email, "password": temp_password},
+        json={"email": email, "password": temp_password, "role": "reviewer"},
     )
     assert login_res.status_code == 200, login_res.text
     assert login_res.json()["status"] == "mfa_setup_required"
@@ -177,7 +179,7 @@ async def _create_active_reviewer(client: AsyncClient, admin_headers: dict[str, 
 
     login_again = await client.post(
         f"{BASE}/auth/login",
-        json={"email": email, "password": new_password},
+        json={"email": email, "password": new_password, "role": "reviewer"},
     )
     assert login_again.status_code == 200, login_again.text
     assert login_again.json()["status"] == "mfa_required"

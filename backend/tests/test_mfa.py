@@ -55,7 +55,7 @@ async def test_enterprise_login_requires_mfa_setup_then_full_session(client):
 
     login = await client.post(
         f"{BASE}/auth/login",
-        json={"email": email, "password": "testpassword123"},
+        json={"email": email, "password": "testpassword123", "role": "enterprise"},
     )
     assert login.status_code == 200
     body = login.json()
@@ -98,7 +98,7 @@ async def test_enterprise_second_login_requires_totp(client):
 
     login1 = await client.post(
         f"{BASE}/auth/login",
-        json={"email": email, "password": "testpassword123"},
+        json={"email": email, "password": "testpassword123", "role": "enterprise"},
     )
     pending = login1.json()["mfa_pending_token"]
     init = await client.post(
@@ -115,7 +115,7 @@ async def test_enterprise_second_login_requires_totp(client):
 
     login2 = await client.post(
         f"{BASE}/auth/login",
-        json={"email": email, "password": "testpassword123"},
+        json={"email": email, "password": "testpassword123", "role": "enterprise"},
     )
     assert login2.json()["status"] == "mfa_required"
     pending2 = login2.json()["mfa_pending_token"]

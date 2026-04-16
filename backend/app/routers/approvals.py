@@ -6,6 +6,8 @@ Stage 3: Legal Review
 Stage 4: Security Review
 Stage 5: Final Approver Sign-off
 """
+from __future__ import annotations
+
 
 from fastapi import APIRouter, Depends, Path
 from typing import Optional

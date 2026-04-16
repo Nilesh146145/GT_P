@@ -1,4 +1,6 @@
 """Enumerations for Manual SOW intake API (spec §2)."""
+from __future__ import annotations
+
 
 from enum import Enum
 

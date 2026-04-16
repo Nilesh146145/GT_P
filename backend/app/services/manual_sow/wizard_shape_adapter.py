@@ -74,6 +74,27 @@ def _personal_bool(v: Optional[str]) -> bool:
     return (v or "").lower() == "yes"
 
 
+def _wizard_platform_label_from_manual(ds: Dict[str, Any]) -> str:
+    """Map Manual SOW ``platformType`` codes to wizard ``PlatformType`` display values."""
+    from app.schemas.manual_sow.manual_sow_platform_type import normalize_manual_sow_platform_type
+
+    raw_in = str(ds.get("platformType") or ds.get("platform_type") or "").strip()
+    norm = normalize_manual_sow_platform_type(raw_in)
+    raw = (norm or raw_in).strip().upper()
+    m = {
+        "WEB_APPLICATION": PlatformType.web_app.value,
+        "MOBILE_IOS": PlatformType.mobile_ios.value,
+        "MOBILE_ANDROID": PlatformType.mobile_android.value,
+        "MOBILE_HYBRID": PlatformType.mobile_cross.value,
+        "DESKTOP": PlatformType.desktop.value,
+        "API_BACKEND_ONLY": PlatformType.api_backend.value,
+        "DATA_PLATFORM": PlatformType.data_pipeline.value,
+        "FULL_STACK": PlatformType.web_and_mobile.value,
+        "OTHER": PlatformType.other.value,
+    }
+    return m.get(raw, PlatformType.other.value)
+
+
 def _sensitivity_title(s: Optional[str]) -> str:
     """Map manual public/internal to wizard DataSensitivity display strings."""
     m = {
@@ -283,7 +304,7 @@ def build_wizard_data_from_manual(
             "industry": Industry.other.value,
             "industry_other": industry_hint or "General",
             "project_category": ProjectCategory.feature_expansion.value,
-            "platform_type": PlatformType.web_app.value,
+            "platform_type": _wizard_platform_label_from_manual(ds),
             "platform_other": None,
             "client_tech_landscape": ti.get("technologyStack") or "",
         },

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.project_portfolio.schemas.project import (

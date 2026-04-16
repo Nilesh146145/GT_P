@@ -13,6 +13,7 @@ from app.schemas.reviewer.reviewer_user import (
     CreateReviewerResponse,
     ReviewerLifecycleStatus,
 )
+from app.services.email_role_guard import normalize_role, role_conflict_registered_message
 
 
 def _generate_temporary_password(length: int = 16) -> str:
@@ -27,10 +28,15 @@ def _lifecycle_allows_login(status_value: ReviewerLifecycleStatus) -> bool:
 async def create_reviewer_user(payload: CreateReviewerRequest, current_user: dict) -> CreateReviewerResponse:
     users_col = get_users_collection()
     email_lower = payload.email.lower()
-    if await users_col.find_one({"email": email_lower}):
+    existing = await users_col.find_one({"email": email_lower})
+    if existing:
+        existing_role = normalize_role(existing.get("role"), default="enterprise") or "enterprise"
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email already exists.",
+            detail={
+                "code": "EMAIL_ROLE_CONFLICT",
+                "message": role_conflict_registered_message(existing_role),
+            },
         )
 
     username = payload.username.strip().lower()

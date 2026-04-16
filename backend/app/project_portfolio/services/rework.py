@@ -1,4 +1,8 @@
-from datetime import UTC, date, datetime
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+
+UTC = timezone.utc  # Python 3.9 (datetime.UTC is 3.11+)
 
 from app.project_portfolio.schemas.rework import ReworkRequest, ReworkRequestStatus, ReworkRequestsResponse
 from app.project_portfolio.services.projects import project_exists
