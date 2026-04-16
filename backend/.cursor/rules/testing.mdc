@@ -1,0 +1,71 @@
+---
+description: Testing patterns, pytest-asyncio setup, fixtures, test structure
+globs: ["tests/**/*.py", "pytest.ini", "conftest.py"]
+alwaysApply: false
+---
+
+# Testing Rules
+
+## Framework
+- `pytest` + `pytest-asyncio`
+- All async tests must be marked: `@pytest.mark.asyncio`
+- Fixtures in `tests/conftest.py`
+
+## Running Tests
+```bash
+# Full suite (requires MongoDB on localhost:27017)
+pytest tests/ -v
+
+# Specific test
+pytest tests/test_wizard.py::test_full_generate_flow -v
+
+# Unit tests only (no DB needed)
+pytest tests/test_wizard.py -k "confidence or hallucination" -v
+```
+
+## Test Structure Pattern
+```python
+import pytest
+from httpx import AsyncClient
+from app.main import app
+
+@pytest.mark.asyncio
+async def test_something(client: AsyncClient, auth_headers: dict):
+    response = await client.post("/api/v1/resource", json={...}, headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+```
+
+## Fixtures to Use (from conftest.py)
+- `client` — AsyncClient wrapping the FastAPI app
+- `auth_headers` — dict with `Authorization: Bearer <token>` for an authenticated test user
+- Any DB fixtures clean up after themselves
+
+## What to Test
+When adding new endpoints or services, always write tests for:
+1. **Happy path** — valid input, expected response
+2. **Validation errors** — missing required fields, wrong types
+3. **Auth guard** — 401 when no/invalid token
+4. **Business rules** — WIZ-* codes where applicable
+5. **Edge cases** — empty lists, boundary budget values, etc.
+
+## Confidence / Hallucination Unit Tests
+These don't need DB — test the pure functions in `confidence.py` directly:
+```python
+from app.services.confidence import calculate_confidence_score, check_hallucination_layers
+
+def test_confidence_all_mandatory():
+    steps = {0, 1, 2, 5, 7, 8}  # mandatory only
+    score = calculate_confidence_score(completed_steps=steps, skipped_steps=set())
+    assert score == 80  # 20+18+15+12+10+5
+
+def test_layer6_red_when_no_nondiscrimination():
+    layers = check_hallucination_layers(non_discrimination_confirmed=False, ...)
+    assert layers[5]["status"] == "red"
+```
+
+## Never
+- Never write tests that leave data in MongoDB after completion
+- Never hardcode real credentials in test files — use fixtures
+- Never skip testing WIZ-006 (non-discrimination hard block)
