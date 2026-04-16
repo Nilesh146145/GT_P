@@ -135,7 +135,7 @@ class SessionListResponse(BaseModel):
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
-    role: Optional[str] = None
+    role: str
 
 
 class PasswordChangeRequest(BaseModel):
