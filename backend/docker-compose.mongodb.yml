@@ -1,0 +1,13 @@
+# Local MongoDB for Manual SOW / auth. From backend/ run:
+#   docker compose -f docker-compose.mongodb.yml up -d
+# Then restart uvicorn. Default MONGODB_URL=mongodb://127.0.0.1:27017 matches this service.
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - glimmora_mongo_data:/data/db
+
+volumes:
+  glimmora_mongo_data:

@@ -1,0 +1,187 @@
+---
+description: GlimmoraTeam — AI SOW Generator Backend Rules
+alwaysApply: true
+---
+
+# GlimmoraTeam — AI SOW Generator API
+
+## Project Overview
+FastAPI + MongoDB backend for the 10-Step Statement of Work (SOW) Wizard.
+**Stack:** Python 3.11+, FastAPI, Motor (async MongoDB), Pydantic v2, JWT auth, pytest-asyncio.
+
+---
+
+## Project Structure
+```
+sow_backend/
+├── app/
+│   ├── main.py                  # FastAPI app, CORS, routers, lifespan
+│   ├── core/
+│   │   ├── config.py            # Settings via pydantic-settings (.env)
+│   │   ├── database.py          # Motor async MongoDB client + collection accessors
+│   │   └── security.py          # JWT tokens, bcrypt hashing, get_current_user dep
+│   ├── routers/
+│   │   ├── auth.py              # Register, login, OTP, MFA, password reset, /me
+│   │   ├── wizard.py            # All 10 step PUT endpoints + generate
+│   │   ├── sow.py               # AI Draft Review endpoints
+│   │   ├── approvals.py         # 5-stage approval pipeline
+│   │   └── users.py             # User search for approver picker
+│   ├── schemas/
+│   │   ├── common.py            # Shared enums, BaseResponse
+│   │   ├── auth.py              # Auth request/response schemas
+│   │   ├── wizard.py            # Wizard/SOW document schemas
+│   │   ├── step0.py             # Step 0 — Project Context & Discovery
+│   │   ├── step1_2.py           # Steps 1–2 — Scope + Delivery
+│   │   ├── step3_5.py           # Steps 3–5 — Integrations, Timeline, Budget
+│   │   └── step6_8.py           # Steps 6–8 — Quality, Governance, Legal
+│   └── services/
+│       ├── wizard_service.py    # Wizard CRUD + generation orchestration
+│       ├── confidence.py        # AI confidence scoring + hallucination layers
+│       └── sow_generator.py     # SOW content generation + risk scoring
+├── tests/
+│   └── test_wizard.py
+├── .env.example
+├── requirements.txt
+└── pytest.ini
+```
+
+---
+
+## Coding Conventions
+
+### General
+- **Python 3.11+** — use `match/case`, `type X = ...` where appropriate.
+- **Async everywhere** — all DB calls use `await`, all route handlers are `async def`.
+- **Pydantic v2** — use `model_config = ConfigDict(...)`, NOT `class Config`.
+- **Type hints** — always annotate function signatures, return types included.
+- **Docstrings** — use triple-quoted docstrings for all routers, services, and non-trivial functions.
+
+### FastAPI Router Pattern
+Every router must follow this structure:
+```python
+router = APIRouter(prefix="/resource", tags=["ResourceName"])
+
+@router.get("/{id}", response_model=ResponseSchema, summary="Human readable summary")
+async def get_resource(
+    id: str,
+    current_user: dict = Depends(get_current_user),
+) -> ResponseSchema:
+    """Docstring describing the endpoint."""
+    ...
+```
+
+### MongoDB / Motor Pattern
+- Always use collection accessors from `app.core.database`, never create your own client.
+- Convert `_id` → `id` as string before returning to client:
+```python
+doc["id"] = str(doc["_id"])
+```
+- For queries by ID, always wrap with `ObjectId()` and handle `bson.errors.InvalidId`.
+- Use `await col.find_one(...)` for single docs, `col.find(...)` with `async for` for lists.
+
+### Response Pattern
+All endpoints must return a `BaseResponse`-based schema:
+```python
+return {"success": True, "message": "...", "data": {...}}
+```
+Errors must raise `HTTPException` with appropriate status codes.
+
+### Auth Pattern
+All protected endpoints must include:
+```python
+current_user: dict = Depends(get_current_user)
+```
+Use `current_user["id"]` (string) and `current_user["role"]` for access control.
+
+---
+
+## Validation Rules (Wizard)
+Always enforce these — never skip them:
+
+| Code    | Rule |
+|---------|------|
+| WIZ-001 | Steps 0,1,2,5,7,8 must be complete before generation |
+| WIZ-002 | Data Sensitivity Level has NO default — must be explicitly selected |
+| WIZ-003 | Both Business Owner + Final Approver required |
+| WIZ-004 | Industry "Other" requires free-text |
+| WIZ-005 | Budget max ≥ min |
+| WIZ-006 | Non-discrimination — HARD BLOCK, cannot be overridden |
+| WIZ-007 | Personal data → privacy law selection required |
+| WIZ-008 | Migration → technical detail required |
+| WIZ-009 | UAT sign-off authority required |
+| WIZ-010 | Business objectives need at least one measurable target |
+| WIZ-011 | Browser + device matrix — at least one each |
+
+---
+
+## Confidence Scoring Weights
+When calculating/updating confidence scores, use these weights exactly:
+
+| Step | Weight |
+|------|--------|
+| 0    | 20%    |
+| 1    | 18%    |
+| 2    | 15%    |
+| 3    | 8% (optional, −8% if skipped) |
+| 4    | 7% (optional, −7% if skipped) |
+| 5    | 12%    |
+| 6    | 5% (optional, −5% if skipped) |
+| 7    | 10%    |
+| 8    | 5%     |
+
+Thresholds: `< 60%` = Low · `60–89%` = Medium · `≥ 90%` = Ready
+
+---
+
+## Hallucination Layers
+8 layers must all pass before `[Submit for Approval]` is allowed.
+Red layers = hard block that **cannot** be overridden by any user.
+
+| Layer | Name | Triggers After |
+|-------|------|---------------|
+| 1 | Template Selection Validation | Step 1 |
+| 2 | Scope Boundary Enforcement | Step 1 |
+| 3 | Clause Library Matching | Step 7 |
+| 4 | Cross-Step Consistency Check | Step 2 |
+| 5 | Compliance Alignment | Step 7 |
+| 6 | Prohibited Clause Detection | Step 7 (non-discrimination) |
+| 7 | Business Context Anchoring | Step 0 |
+| 8 | Evidence Pack Gate Validation | Step 4 |
+
+---
+
+## Environment Variables
+```
+MONGODB_URL=mongodb://localhost:27017
+DATABASE_NAME=sow_generator
+SECRET_KEY=<min 32 chars>
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+REFRESH_TOKEN_EXPIRE_DAYS=7
+OTP_DRY_RUN=True          # set False in prod + wire real gateway
+MIN_BUDGET_INR=500000
+MIN_BUDGET_USD=6000
+```
+
+---
+
+## API Prefix
+All routes use prefix: `/api/v1`
+
+---
+
+## Testing
+- Framework: `pytest` + `pytest-asyncio`
+- All test fixtures are in `tests/conftest.py`
+- Run: `pytest tests/ -v`
+- Unit tests (no DB): `pytest tests/test_wizard.py -k "confidence or hallucination" -v`
+
+---
+
+## Do NOT
+- Do NOT use synchronous DB calls (no `pymongo` directly in routers/services).
+- Do NOT return raw MongoDB `_id` (ObjectId) — always convert to string.
+- Do NOT use `class Config` in Pydantic models — use `model_config = ConfigDict(...)`.
+- Do NOT add new router prefixes outside of `/api/v1`.
+- Do NOT hardcode secrets or connection strings — always use `settings.*`.
+- Do NOT allow WIZ-006 (non-discrimination) to be bypassed under any circumstance.
