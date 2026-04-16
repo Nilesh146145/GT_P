@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.manual_sow.enums import CommercialSectionKey, ExtractionReviewState
 
@@ -88,6 +89,105 @@ class SowMetadataPatch(BaseModel):
     tags: Optional[list[str]] = None
     stakeholders: Optional[list[str]] = None
     estimated_budget: Optional[float] = Field(default=None, alias="estimated_budget")
+
+
+class AiGeneratedTextContent(BaseModel):
+    """JSON inside `AI-generated-text`: narrative plus explicit tech list under `AI-generated-tech-stack`."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    title: str = Field(..., min_length=1, max_length=240, description="Heading for the AI block.")
+    tags: list[str] = Field(default_factory=list, description="Short technology / capability tags.")
+    tech_stack: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=40,
+        alias="AI-generated-tech-stack",
+        description='Concrete technologies as JSON array, e.g. ["Python","FastAPI","React","PostgreSQL"].',
+    )
+    summary: str = Field(
+        ...,
+        min_length=10,
+        max_length=2000,
+        description="Technology stack narrative suitable for Tech & Integrations.",
+    )
+    technology_stack_line: Optional[str] = Field(
+        default=None,
+        max_length=800,
+        alias="technologyStackLine",
+        description='Single-line stack for UI, e.g. "React (frontend) · Node.js (API layer) · PostgreSQL (primary database)".',
+    )
+    scalability_performance: Optional[str] = Field(
+        default=None,
+        max_length=2000,
+        alias="scalabilityPerformance",
+        description="Scalability, performance, and capacity notes for Section C (Technical Architecture).",
+    )
+    user_management_scope: Optional[str] = Field(
+        default=None,
+        max_length=2000,
+        alias="userManagementScope",
+        description="User management, roles, and IdP / SSO scope for Section C.",
+    )
+    sso_required: Optional[bool] = Field(
+        default=None,
+        alias="ssoRequired",
+        description="Whether SSO is required for this project (Section C checkbox).",
+    )
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _coerce_tags(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        s = str(v).strip()
+        return [s] if s else []
+
+    @field_validator("tech_stack", mode="before")
+    @classmethod
+    def _coerce_tech_stack(cls, v: Any) -> list[str]:
+        if v is None:
+            raise ValueError("AI-generated-tech-stack is required (non-empty array of strings).")
+        if isinstance(v, list):
+            out = [str(x).strip() for x in v if str(x).strip()]
+            if not out:
+                raise ValueError("AI-generated-tech-stack must contain at least one technology name.")
+            return out[:40]
+        if isinstance(v, str):
+            parts = [p.strip() for p in re.split(r"[,;|]", v) if p.strip()]
+            if not parts:
+                raise ValueError("AI-generated-tech-stack must contain at least one technology name.")
+            return parts[:40]
+        s = str(v).strip()
+        if not s:
+            raise ValueError("AI-generated-tech-stack must contain at least one technology name.")
+        return [s]
+
+    @model_validator(mode="after")
+    def _ensure_derived_section_c_fields(self):
+        updates: dict[str, Any] = {}
+        line = (self.technology_stack_line or "").strip()
+        if not line and self.tech_stack:
+            line = " · ".join(f"{x} (stack component)" for x in self.tech_stack[:10])
+        if line:
+            updates["technology_stack_line"] = line
+        if not (self.scalability_performance or "").strip():
+            updates["scalability_performance"] = (
+                "Define target concurrent users and p95 latency SLOs for APIs where applicable. "
+                "Plan horizontal autoscaling for stateless tiers, caching for hot reads, and CDN for static assets when a web or hybrid client exists. "
+                "Document load-test milestones before go-live."
+            )
+        if not (self.user_management_scope or "").strip():
+            updates["user_management_scope"] = (
+                "Application roles with least-privilege access; corporate directory integration when SSO is enabled."
+            )
+        if self.sso_required is None:
+            updates["sso_required"] = True
+        if not updates:
+            return self
+        return self.model_copy(update=updates)
 
 
 class PaginationParams(BaseModel):

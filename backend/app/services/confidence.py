@@ -3,6 +3,8 @@ Confidence Scoring Service
 Computes the AI Confidence score (0–100%) based on wizard step completion and detail depth.
 Step weights reflect their importance — mandatory steps carry higher weight.
 """
+from __future__ import annotations
+
 
 from typing import Any, Dict, List
 

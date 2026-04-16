@@ -1,6 +1,8 @@
 """
 Contributor registration — full profile stored under contributor_profile on the user document.
 """
+from __future__ import annotations
+
 
 import logging
 from datetime import datetime, timezone
@@ -11,6 +13,7 @@ from app.core.database import get_users_collection
 from app.core.security import get_password_hash
 from app.schemas.auth import AuthUser
 from app.schemas.contributor_auth import ContributorRegisterRequest, ContributorRegisterResponse
+from app.services.email_role_guard import normalize_role, role_conflict_registered_message
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +51,27 @@ async def register_contributor(payload: ContributorRegisterRequest) -> Contribut
     email_lower = payload.email.lower()
     ver_email_lower = payload.effective_verification_email()
 
-    if await col.find_one({"email": email_lower}):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered.")
-    if ver_email_lower != email_lower and await col.find_one({"email": ver_email_lower}):
+    existing_primary = await col.find_one({"email": email_lower})
+    if existing_primary:
+        existing_role = normalize_role(existing_primary.get("role"), default="enterprise") or "enterprise"
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Verification email is already registered to another account.",
+            detail={
+                "code": "EMAIL_ROLE_CONFLICT",
+                "message": role_conflict_registered_message(existing_role),
+            },
         )
+    if ver_email_lower != email_lower:
+        existing_verification = await col.find_one({"email": ver_email_lower})
+        if existing_verification:
+            existing_role = normalize_role(existing_verification.get("role"), default="enterprise") or "enterprise"
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "EMAIL_ROLE_CONFLICT",
+                    "message": role_conflict_registered_message(existing_role),
+                },
+            )
 
     now = datetime.now(timezone.utc)
     full_name = f"{payload.first_name.strip()} {payload.last_name.strip()}".strip()

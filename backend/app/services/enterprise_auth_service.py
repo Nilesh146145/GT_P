@@ -7,6 +7,8 @@ Collections:
   enterprises — org-level document
   users       — admin user linked to enterprise
 """
+from __future__ import annotations
+
 
 
 import logging
@@ -25,6 +27,7 @@ from app.schemas.enterprise_auth import (
     EnterpriseRegisterRequest,
     EnterpriseRegisterResponse,
 )
+from app.services.email_role_guard import normalize_role, role_conflict_registered_message
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +60,16 @@ async def get_enterprise_company_profile(enterprise_profile_id: str) -> Enterpri
 
 async def register_enterprise(payload: EnterpriseRegisterRequest) -> EnterpriseRegisterResponse:
     col = get_users_collection()
-    if await col.find_one({"email": payload.email.lower()}):
-        raise HTTPException(status_code=409, detail="Email already registered.")
+    existing = await col.find_one({"email": payload.email.lower()})
+    if existing:
+        existing_role = normalize_role(existing.get("role"), default="enterprise") or "enterprise"
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "EMAIL_ROLE_CONFLICT",
+                "message": role_conflict_registered_message(existing_role),
+            },
+        )
 
     db = get_db()
     now = datetime.utcnow()

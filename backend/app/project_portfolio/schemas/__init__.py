@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from app.project_portfolio.schemas.evidence import EvidencePackStatus, EvidencePacksResponse
 from app.project_portfolio.schemas.exception import ExceptionsResponse, ProjectException
 from app.project_portfolio.schemas.payment import PaymentHistoryResponse, PendingPaymentsResponse

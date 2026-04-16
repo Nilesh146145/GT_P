@@ -1,0 +1,14 @@
+temp_api_db — temporary demo storage
+====================================
+1) Stop uvicorn (Ctrl+C).
+2) Delete this entire folder (temp_api_db).
+3) Start uvicorn again — files and DB are recreated.
+
+What lives here:
+  dashboard.json              — GET /api/contributor/me, /dashboard, /notifications
+  contributors/<id>/contributor_tasks.sqlite — per authenticated contributor (tasks API)
+  contributor_tasks.sqlite    — legacy single-file path if CONTRIBUTOR_TASKS_DB unset (unused by API)
+
+Also re-seeded on every process start (in RAM):
+  credentials, earnings, payouts prefs, profile, messages, learning, support, settings extras.
+  Submissions are seeded on first request per contributor.

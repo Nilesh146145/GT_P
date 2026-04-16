@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 import bcrypt
 from jose import JWTError, jwt
+from jose.exceptions import ExpiredSignatureError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -70,8 +73,18 @@ def create_mfa_pending_token(sub: str, role: str, mfa_flow: str) -> str:
 
 
 def decode_token(token: str) -> dict:
+    """Decode JWT; tolerate a duplicated `Bearer ` prefix (common Swagger mistake)."""
+    t = (token or "").strip()
+    if t.lower().startswith("bearer "):
+        t = t[7:].lstrip()
     try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        return jwt.decode(t, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    except ExpiredSignatureError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Access token expired. Sign in again or use refresh.",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
     except JWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -126,7 +139,14 @@ async def get_current_user(
     )
     payload = decode_token(credentials.credentials)
     if payload.get("type") != "access":
-        raise credentials_exception
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "Invalid token type for this endpoint — use the access_token from login "
+                "(not refresh_token or MFA pending token)."
+            ),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     user_id: str | None = payload.get("sub")
     if user_id is None:
         raise credentials_exception

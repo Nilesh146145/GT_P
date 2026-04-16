@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter
 
 from app.billing.routers import invoices, payments, refunds, summary

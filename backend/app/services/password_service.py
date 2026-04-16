@@ -7,39 +7,48 @@ Handles password reset initiation.
   stores it in the password_resets collection, and logs it (dry-run).
   In production, wire this to your email delivery service.
 """
+from __future__ import annotations
+
 
 
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional
-
 from bson import ObjectId
 from fastapi import HTTPException, status
 
 from app.core.database import get_db, get_sessions_collection, get_users_collection
 from app.core.security import get_password_hash, verify_password
+from app.services.email_role_guard import normalize_role, require_supported_role
 
 logger = logging.getLogger(__name__)
 
 
-async def start_password_reset(email: str, role: Optional[str] = None) -> None:
+async def start_password_reset(email: str, role: str) -> None:
     """
     Generate a password reset token for the given email (+ optional role filter).
-    Always returns without error — never reveals whether the email exists
-    (prevents user enumeration).
+    For unknown emails, returns silently (prevents user enumeration).
+    If the role does not match the email's role, raises a role conflict.
 
     In production: replace the logger.info call with your email gateway.
     """
     col = get_users_collection()
-    query: dict = {"email": email.lower()}
-    if role:
-        query["role"] = role
-
-    user = await col.find_one(query)
+    email_lower = email.lower()
+    user = await col.find_one({"email": email_lower})
     if not user:
         # Silent no-op — don't expose whether the email is registered
         return
+    stored_role = normalize_role(user.get("role"), default="enterprise") or "enterprise"
+
+    requested_role = require_supported_role(role, field_name="password reset role")
+    if requested_role != stored_role:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "EMAIL_ROLE_CONFLICT",
+                "message": "Email already exists with a different role.",
+            },
+        )
 
     token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(hours=1)
@@ -47,15 +56,15 @@ async def start_password_reset(email: str, role: Optional[str] = None) -> None:
     db = get_db()
     await db["password_resets"].insert_one({
         "user_id": str(user["_id"]),
-        "email": email.lower(),
-        "role": role,
+        "email": email_lower,
+        "role": stored_role,
         "token": token,
         "expires_at": expires_at,
         "used": False,
     })
 
     # TODO: replace with real email delivery in production
-    logger.info("[DRY RUN] Password reset token for %s (role=%s): %s", email, role, token)
+    logger.info("[DRY RUN] Password reset token for %s (role=%s): %s", email, stored_role, token)
 
 
 async def change_password(user_id: str, current_password: str, new_password: str) -> None:

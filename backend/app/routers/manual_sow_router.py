@@ -187,15 +187,32 @@ async def patch_gap(sow_id: str, gap_id: str, body: dict[str, Any], current_user
     return await ManualSowService.patch_gap(sow_id, gap_id, body)
 
 
-@router.get("/{sow_id}/commercial-details", dependencies=[Depends(_rate_api)])
-async def get_commercial(sow_id: str, current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/{sow_id}/commercial-details",
+    dependencies=[Depends(_rate_api)],
+    summary="Commercial details (+ Section C AI when eligible)",
+    description=(
+        "Returns **`commercial_details`**, **`section_status`**, unlock flags, and **`aiGeneratedText`** (or null). "
+        "Keep **`platformType`** / **`developmentScope`** under **`deliveryScope`** only. "
+        "May auto-generate Section C AI when ready; **`regenerateAiTechStack`** or PATCH **`deliveryScope`** clears stored AI. See **`autoAiTechStack`** / **`commercialDetailsApiRevision`**."
+    ),
+)
+async def get_commercial(
+    sow_id: str,
+    regenerate_ai_tech_stack: bool = Query(
+        False,
+        alias="regenerateAiTechStack",
+        description="Clear stored Section C AI and regenerate when eligible.",
+    ),
+    current_user: dict = Depends(get_current_user),
+):
     doc = await ManualSowService.get_sow_doc(sow_id)
     if not doc:
         from fastapi import HTTPException
 
         raise HTTPException(status_code=404, detail="SOW not found")
     await ManualSowService.assert_access(doc, current_user)
-    return await ManualSowService.get_commercial_details(sow_id)
+    return await ManualSowService.get_commercial_details(sow_id, regenerate_ai_tech_stack=regenerate_ai_tech_stack)
 
 
 @router.patch("/{sow_id}/commercial-details/{section}", dependencies=[Depends(_rate_api)])

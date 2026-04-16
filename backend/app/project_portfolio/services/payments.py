@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc  # Python 3.9 (datetime.UTC is 3.11+)
 import random
 import string
 

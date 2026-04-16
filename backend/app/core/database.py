@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -5,6 +7,12 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class DatabaseNotAvailable(RuntimeError):
+    """Mongo client is None (connection failed at startup — API is in degraded mode)."""
+
+
 from app.models.reviewer import (
     REVIEWER_ASSIGNMENTS_COLLECTION,
     REVIEWER_EVIDENCE_COLLECTION,
@@ -34,7 +42,19 @@ async def connect_db() -> None:
         await client[settings.DATABASE_NAME].command("ping")
         print(f"Connected to MongoDB: {_mongo_url_for_log(settings.MONGODB_URL)}")
     except Exception as e:
-        logger.exception("MongoDB unavailable — starting API in degraded mode: %s", e)
+        logger.warning(
+            "MongoDB unavailable — API starts in degraded mode. %s (%s: %s)",
+            _mongo_url_for_log(settings.MONGODB_URL),
+            type(e).__name__,
+            e,
+        )
+        if "localhost" in settings.MONGODB_URL or "127.0.0.1" in settings.MONGODB_URL:
+            logger.warning(
+                "MONGODB_URL still points at this machine (%s). For MongoDB Atlas, "
+                "replace it in backend/.env with the mongodb+srv://… string from Atlas "
+                "(Database → Connect → Drivers), allow your IP under Network Access, then restart.",
+                _mongo_url_for_log(settings.MONGODB_URL),
+            )
         client = None
 
 
@@ -51,7 +71,11 @@ def is_db_connected() -> bool:
 
 def get_database():
     if client is None:
-        raise RuntimeError("Database not initialized")
+        raise DatabaseNotAvailable(
+            "MongoDB is not connected. Start MongoDB (e.g. "
+            "`docker run -d -p 27017:27017 mongo:7`) or set MONGODB_URL in "
+            "backend/.env and restart the API."
+        )
     return client[settings.DATABASE_NAME]
 
 
