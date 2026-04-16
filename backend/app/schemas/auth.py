@@ -103,6 +103,7 @@ class CurrentUserResponse(BaseModel):
     mfa_enabled: bool = Field(default=False, alias="mfaEnabled")
     mfa_enrollment_required: bool = Field(default=False, alias="mfaEnrollmentRequired")
     auth_pending: bool = Field(default=False, alias="authPending")
+    profile_image_url: Optional[str] = Field(default=None, alias="profileImageUrl")
     enterprise_profile: Optional["EnterpriseCompanyProfile"] = Field(default=None, alias="enterpriseProfile")
 
     model_config = ConfigDict(
